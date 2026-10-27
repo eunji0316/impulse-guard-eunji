@@ -1,0 +1,12 @@
+# impulse-guard 프로젝트 규칙
+- 영카트5(그누보드 5.6.43) 기반 충동구매 방지 서비스
+- 로컬 서버: php -S localhost:8000, DB: MariaDB youngcart_db
+- 우리 코드는 ipp/ 폴더에 둔다. 그누보드 기본 파일은 수정하지 않는다.
+- extend/, adm/에 추가하는 파일은 이름 앞에 ipp를 붙인다.
+- 설정값과 기능 스위치는 extend/ipp.extend.php에 상수로 둔다.
+- 포인트 지급은 반드시 ipp_give_point()를 거친다.
+- 외부 API(은행, 기프티콘)는 lib 파일의 함수 하나로 감싸 mock으로 만든다.
+- DB 변경은 ipp/sql/에 번호를 붙인 새 SQL 파일로 추가한다.
+- data/ 폴더는 Git에 올리지 않는다.
+- 브랜치: main(안정), dev(통합), feature/기능명
+- 설명과 주석은 한국어로 작성한다.
