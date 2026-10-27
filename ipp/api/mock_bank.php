@@ -21,6 +21,24 @@ if ($action === 'link') {
     ipp_json(true, array('ac_id' => $ac_id));
 }
 
+// 결제 전 감지만 실행 (저장하지 않음)
+if ($action === 'check') {
+    $amount   = isset($_POST['amount'])   ? (int)$_POST['amount'] : 0;
+    $merchant = isset($_POST['merchant']) ? trim($_POST['merchant']) : '';
+    $category = isset($_POST['category']) ? trim($_POST['category']) : '';
+    $datetime = !empty($_POST['datetime'])
+              ? date('Y-m-d H:i:s', strtotime($_POST['datetime']))
+              : G5_TIME_YMDHIS;
+
+    if ($amount <= 0 || $merchant === '') ipp_json(false, array('msg' => '금액과 가맹점을 입력하세요.'));
+
+    ipp_json(true, array(
+        'is_impulse' => ipp_detect_impulse($amount, $category, $datetime),
+        'point'      => ipp_calc_point($amount),
+        'point2'     => ipp_calc_point($amount, IPP_COOLDOWN_MULTIPLIER)
+    ));
+}
+
 // 가짜 결제 발생
 if ($action === 'pay') {
     $account = ipp_bank_get_account($mb_id);

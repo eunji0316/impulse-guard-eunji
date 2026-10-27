@@ -16,7 +16,8 @@ define('IPP_COOLDOWN_MULTIPLIER', 2);     // 쿨다운 성공 시 배수
 define('IPP_DAILY_LIMIT',         1000);  // 하루 획득 상한
 
 /* ===== 쿨다운 기준 ===== */
-define('IPP_COOLDOWN_HOURS', 24);
+//define('IPP_COOLDOWN_HOURS', 0.02);   // 약 1분 (테스트용)
+define('IPP_COOLDOWN_HOURS', 24); // 24시간 (실제 서비스용)
 
 /* ===== 충동구매 감지 기준 ===== */
 define('IPP_DETECT_NIGHT_START', 23);     // 23시부터

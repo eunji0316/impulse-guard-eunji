@@ -62,33 +62,87 @@ include_once(G5_PATH.'/head.php');
 
 </div>
 
-<script>
-const IPP_API = '<?php echo IPP_URL; ?>/api/mock_bank.php';
+<div id="ipp-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#fff;width:90%;max-width:360px;padding:28px;border-radius:12px;text-align:center;">
+        <div style="font-size:42px;">⏳</div>
+        <h3 style="margin:10px 0;">정말 필요한 것인가요?</h3>
+        <p id="ipp-modal-desc" style="color:#555;"></p>
+        <button type="button" onclick="ippHold()" style="display:block;width:100%;padding:12px;margin-top:14px;background:#4a5af0;color:#fff;border:0;border-radius:8px;">
+            24시간 담아두기 (성공 시 <span id="ipp-p2"></span>P)
+        </button>
+        <button type="button" onclick="ippGiveup()" style="display:block;width:100%;padding:12px;margin-top:8px;background:#eee;border:0;border-radius:8px;">
+            안 살래요 (<span id="ipp-p1"></span>P)
+        </button>
+        <button type="button" onclick="ippDoPay(ippPending)" style="margin-top:12px;background:none;border:0;color:#999;text-decoration:underline;">
+            그래도 결제할래요
+        </button>
+    </div>
+</div>
 
-function ippPost(data) {
+<script>
+const IPP_BANK_API     = '<?php echo IPP_URL; ?>/api/mock_bank.php';
+const IPP_CD_API       = '<?php echo IPP_URL; ?>/api/cooldown.php';
+const IPP_USE_COOLDOWN = <?php echo IPP_USE_COOLDOWN ? 'true' : 'false'; ?>;
+let ippPending = null;
+
+function ippPost(url, data) {
     const fd = new FormData();
     for (const k in data) fd.append(k, data[k]);
-    return fetch(IPP_API, { method: 'POST', body: fd }).then(r => r.json());
+    return fetch(url, { method: 'POST', body: fd }).then(r => r.json());
 }
 
 function ippLink() {
-    ippPost({ action: 'link', bank: document.getElementById('bank').value })
+    ippPost(IPP_BANK_API, { action: 'link', bank: document.getElementById('bank').value })
         .then(res => res.ok ? location.reload() : alert(res.msg));
 }
 
-function ippPay() {
-    ippPost({
-        action:   'pay',
+function ippForm() {
+    return {
         merchant: document.getElementById('merchant').value,
         amount:   document.getElementById('amount').value,
         category: document.getElementById('category').value,
         datetime: document.getElementById('datetime').value
-    }).then(res => {
+    };
+}
+
+// 결제 버튼: 감지 먼저, 감지되면 팝업
+function ippPay() {
+    const f = ippForm();
+    if (!IPP_USE_COOLDOWN) return ippDoPay(f);
+
+    ippPost(IPP_BANK_API, Object.assign({ action: 'check' }, f)).then(res => {
         if (!res.ok) return alert(res.msg);
-        if (res.is_impulse) alert('충동구매가 감지되었습니다!');
-        location.reload();
+        if (!res.is_impulse) return ippDoPay(f);
+
+        ippPending = f;
+        document.getElementById('ipp-modal-desc').textContent =
+            f.merchant + ' ' + Number(f.amount).toLocaleString() + '원 결제를 앞두고 있어요.';
+        document.getElementById('ipp-p1').textContent = res.point;
+        document.getElementById('ipp-p2').textContent = res.point2;
+        document.getElementById('ipp-modal').style.display = 'flex';
     });
 }
-</script>
 
-<?php include_once(G5_PATH.'/tail.php'); ?>
+function ippDoPay(f) {
+    ippPost(IPP_BANK_API, Object.assign({ action: 'pay' }, f))
+        .then(res => res.ok ? location.reload() : alert(res.msg));
+}
+
+function ippHold() {
+    ippPost(IPP_CD_API, { action: 'hold', item: ippPending.merchant, amount: ippPending.amount })
+        .then(res => {
+            if (!res.ok) return alert(res.msg);
+            alert('24시간 동안 보관합니다. 참아내면 더블 포인트!');
+            location.href = '<?php echo IPP_URL; ?>/cooldown.php';
+        });
+}
+
+function ippGiveup() {
+    ippPost(IPP_CD_API, { action: 'giveup', item: ippPending.merchant, amount: ippPending.amount })
+        .then(res => {
+            if (!res.ok) return alert(res.msg);
+            alert(res.point > 0 ? res.point + 'P 적립! 잘 참았어요.' : '오늘 받을 수 있는 포인트를 모두 받았어요.');
+            location.reload();
+        });
+}
+</script>
