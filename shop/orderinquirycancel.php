@@ -1,0 +1,219 @@
+<?php
+include_once('./_common.php');
+
+$od_id = isset($_REQUEST['od_id']) ? safe_replace_regex($_REQUEST['od_id'], 'od_id') : '';
+
+// 세션에 저장된 토큰과 폼으로 넘어온 토큰을 비교하여 틀리면 에러
+if ($token && get_session("ss_token") == $token) {
+    // 맞으면 세션을 지워 다시 입력폼을 통해서 들어오도록 한다.
+    set_session("ss_token", "");
+} else {
+    set_session("ss_token", "");
+    alert("토큰 에러", G5_SHOP_URL);
+}
+
+$od = sql_fetch(" select * from {$g5['g5_shop_order_table']} where od_id = '$od_id' and mb_id = '{$member['mb_id']}' ");
+
+if (! (isset($od['od_id']) && $od['od_id'])) {
+    alert("존재하는 주문이 아닙니다.");
+}
+
+// 주문상품의 상태가 주문인지 체크
+$sql = " select SUM(IF(ct_status = '주문', 1, 0)) as od_count2,
+                COUNT(*) as od_count1
+            from {$g5['g5_shop_cart_table']}
+            where od_id = '$od_id' ";
+$ct = sql_fetch($sql);
+
+$uid = function_exists('get_shop_uid') ? get_shop_uid('order', $od['od_id'], $od['od_time'], $od['od_ip']) : md5($od['od_id'].$od['od_time'].$od['od_ip']);
+
+// 비회원은 주문조회 인증을 통과한 본인 주문만 취소할 수 있다.
+if (empty($member['mb_id']) && (string) $uid !== (string) get_session('ss_orderview_uid'))
+    alert("본인 주문만 취소할 수 있습니다.", G5_SHOP_URL);
+
+if($od['od_cancel_price'] > 0 || $od['od_status'] != '주문' || $ct['od_count1'] != $ct['od_count2']) {
+    alert("취소할 수 있는 주문이 아닙니다.", G5_SHOP_URL."/orderinquiryview.php?od_id=$od_id&amp;uid=$uid");
+}
+
+if ($od['od_pg'] === 'KAKAOPAY') {
+    alert('이 주문의 취소·환불은 쇼핑몰 고객센터에 문의해 주십시오.');
+}
+
+// INIpay PRO 가상계좌 입금통보와 주문자 취소가 동시에 처리되지 않도록
+// PG 취소부터 로컬 주문 취소 완료까지 동일 주문 잠금을 유지한다.
+$inicis_pro_order_lock = '';
+if (!empty($od['od_tno']) && $od['od_pg'] === 'inicis') {
+    include_once(G5_SHOP_PATH.'/inicis/pro/inicis_pro.lib.php');
+    $inicis_pro_tables = inicis_pro_audit_tables();
+    $inicis_pro_order = sql_fetch(" select ip_id from `{$inicis_pro_tables['summary']}`
+                                     where ip_oid = '".sql_escape_string($od['od_id'])."'
+                                       and ip_tid = '".sql_escape_string($od['od_tno'])."' ", false);
+    if (!empty($inicis_pro_order['ip_id'])) {
+        $inicis_pro_order_lock = inicis_pro_lock($od['od_id']);
+        if ($inicis_pro_order_lock === '')
+            alert('동일 주문의 결제 또는 통보 처리가 진행 중입니다. 잠시 후 다시 취소해 주십시오.', G5_SHOP_URL."/orderinquiryview.php?od_id=$od_id&amp;uid=$uid");
+    }
+}
+
+// PG 결제 취소
+if($od['od_tno']) {
+    switch($od['od_pg']) {
+        case 'lg':
+            require_once('./settle_lg.inc.php');
+            $LGD_TID    = $od['od_tno'];        //LG유플러스으로 부터 내려받은 거래번호(LGD_TID)
+
+            $xpay = new XPay($configPath, $CST_PLATFORM);
+
+            // Mert Key 설정
+            $xpay->set_config_value('t'.$LGD_MID, $config['cf_lg_mert_key']);
+            $xpay->set_config_value($LGD_MID, $config['cf_lg_mert_key']);
+            $xpay->Init_TX($LGD_MID);
+
+            $xpay->Set("LGD_TXNAME", "Cancel");
+            $xpay->Set("LGD_TID", $LGD_TID);
+
+            if ($xpay->TX()) {
+                //1)결제취소결과 화면처리(성공,실패 결과 처리를 하시기 바랍니다.)
+                /*
+                echo "결제 취소요청이 완료되었습니다.  <br>";
+                echo "TX Response_code = " . $xpay->Response_Code() . "<br>";
+                echo "TX Response_msg = " . $xpay->Response_Msg() . "<p>";
+                */
+            } else {
+                //2)API 요청 실패 화면처리
+                $msg = "결제 취소요청이 실패하였습니다.\\n";
+                $msg .= "TX Response_code = " . $xpay->Response_Code() . "\\n";
+                $msg .= "TX Response_msg = " . $xpay->Response_Msg();
+
+                alert($msg);
+            }
+            break;
+        case 'toss':
+            $cancel_msg = '주문자 본인 취소-'.$cancel_memo;
+            include_once(G5_SHOP_PATH.'/toss/toss_cancel.php');
+            break;
+        case 'inicis':
+            include_once(G5_SHOP_PATH.'/settle_inicis.inc.php');
+            $cancel_msg = '주문자 본인 취소-'.$cancel_memo;
+
+            $args = array(
+                'paymethod' => get_type_inicis_paymethod($od['od_settle_case']),
+                'tid' => $od['od_tno'],
+                'audit_oid' => $od['od_id'],
+                'audit_source' => 'web',
+                'msg' => $cancel_msg
+            );
+
+            $response = inicis_tid_cancel($args);
+            $result = json_decode($response, true);
+
+            $res_cd = '';
+            $res_msg = 'curl 로 데이터를 받지 못했습니다.';
+
+            if (isset($result['resultCode'])) {
+                $res_cd = $result['resultCode'];
+                $res_msg = $result['resultMsg'];
+            } else {
+                $res_cd = '';
+                $res_msg = 'curl 로 데이터를 받지 못했습니다.';
+            }
+
+            if($res_cd != '00') {
+                alert($res_msg.' 코드 : '.$res_cd);
+            }
+            break;
+        case 'nicepay':
+            include_once(G5_SHOP_PATH.'/settle_nicepay.inc.php');
+            $cancel_msg = '주문자 본인 취소-'.$cancel_memo;
+
+            $tno = $od['od_tno'];
+
+            $cancelAmt = (int)$od['od_receipt_price'];
+            if($od['od_settle_case'] == '가상계좌' && $od['od_status'] == '주문' && $cancelAmt == 0)
+                $cancelAmt = (int)$od['od_misu'];
+
+            if($cancelAmt <= 0)
+                alert('취소 요청금액이 없습니다.', G5_SHOP_URL."/orderinquiryview.php?od_id=$od_id&amp;uid=$uid");
+
+            // 0:전체 취소, 1:부분 취소(별도 계약 필요)
+            $partialCancelCode = 0;
+
+            include G5_SHOP_PATH.'/nicepay/cancel_process.php';
+
+            $res_cd = '';
+            $res_msg = 'curl 로 데이터를 받지 못하거나 통신에 실패했습니다.';
+            
+            if (isset($result['ResultCode'])) {
+
+                $res_cd = $result['ResultCode'];
+
+                // 실패했다면
+                if (! in_array($result['ResultCode'], array('2001', '2211'), true)) {
+                    $res_msg = $result['ResultMsg'];
+                }
+            }
+
+            if(! in_array($res_cd, array('2001', '2211'), true)) {
+                alert($res_msg.' 코드 : '.$res_cd);
+            }
+            break;
+        default:
+            require_once('./settle_kcp.inc.php');
+
+            $_POST['tno'] = $od['od_tno'];
+            $_POST['req_tx'] = 'mod';
+            $_POST['mod_type'] = 'STSC';
+            if($od['od_escrow']) {
+                $_POST['req_tx'] = 'mod_escrow';
+                $_POST['mod_type'] = 'STE2';
+                if($od['od_settle_case'] == '가상계좌')
+                    $_POST['mod_type'] = 'STE5';
+            }
+            $_POST['mod_desc'] = iconv("utf-8", "euc-kr", '주문자 본인 취소-'.$cancel_memo);
+            $_POST['site_cd'] = $default['de_kcp_mid'];
+
+            // 취소내역 한글깨짐방지
+            setlocale(LC_CTYPE, 'ko_KR.euc-kr');
+
+            include G5_SHOP_PATH.'/kcp/pp_ax_hub.php';
+
+            // locale 설정 초기화
+            setlocale(LC_CTYPE, '');
+    }
+}
+
+// 장바구니 자료 취소
+sql_query(" update {$g5['g5_shop_cart_table']} set ct_status = '취소' where od_id = '$od_id' ");
+
+// 주문 취소
+$cancel_memo = addslashes(strip_tags($cancel_memo));
+$cancel_price = $od['od_cart_price'];
+
+$sql = " update {$g5['g5_shop_order_table']}
+            set od_send_cost = '0',
+                od_send_cost2 = '0',
+                od_receipt_price = '0',
+                od_receipt_point = '0',
+                od_misu = '0',
+                od_cancel_price = '$cancel_price',
+                od_cart_coupon = '0',
+                od_coupon = '0',
+                od_send_coupon = '0',
+                od_status = '취소',
+                od_shop_memo = concat(od_shop_memo,\"\\n주문자 본인 직접 취소 - ".G5_TIME_YMDHIS." (취소이유 : {$cancel_memo})\")
+            where od_id = '$od_id' 
+              and od_cancel_price = 0";
+sql_query($sql);
+
+// 주문취소 회원의 포인트를 되돌려 줌
+// get_sql_affected_rows 함수가 존재하지 않으면 포인트를 돌려주는것을 실행 할수 없음
+$affected = function_exists('get_sql_affected_rows') ? get_sql_affected_rows() : 0;
+
+if ($od['od_receipt_point'] > 0 && $affected) {
+    insert_point($member['mb_id'], $od['od_receipt_point'], "주문번호 $od_id 본인 취소", '@shop_order', $od_id, 'cancel');
+}
+
+if ($inicis_pro_order_lock !== '')
+    inicis_pro_unlock($inicis_pro_order_lock);
+
+goto_url(G5_SHOP_URL."/orderinquiryview.php?od_id=$od_id&amp;uid=$uid");
