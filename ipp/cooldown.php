@@ -20,8 +20,10 @@ include_once(G5_PATH.'/head.php');
 <div style="max-width:720px;margin:30px auto;padding:0 15px;">
 <p>
     <a href="<?php echo IPP_URL; ?>/bank.php">← 결제 테스트로</a>
+    <?php if (IPP_USE_GIFTICON) { ?>
     &nbsp;|&nbsp;
-    <a href="<?php echo G5_SHOP_URL; ?>/list.php?ca_id=10">🎁 리워드샵 가기 (보유 <?php echo number_format($member['mb_point']); ?>P)</a>
+    <a href="<?php echo IPP_URL; ?>/reward.php">🎁 기프티콘 교환 (보유 <?php echo number_format($member['mb_point']); ?>P)</a>
+    <?php } ?>
 </p>
 
 <table style="width:100%;border-collapse:collapse;" border="1" cellpadding="6">
