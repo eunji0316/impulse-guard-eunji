@@ -24,6 +24,14 @@ include_once(G5_PATH.'/head.php');
     &nbsp;|&nbsp;
     <a href="<?php echo IPP_URL; ?>/reward.php">🎁 기프티콘 교환 (보유 <?php echo number_format($member['mb_point']); ?>P)</a>
     <?php } ?>
+    <?php if (IPP_USE_SETTING) { ?>
+    &nbsp;|&nbsp;
+    <a href="<?php echo IPP_URL; ?>/setting.php">⚙️ 차단 설정</a>
+    <?php } ?>
+    <?php if (IPP_USE_STATS) { ?>
+    &nbsp;|&nbsp;
+    <a href="<?php echo IPP_URL; ?>/stats.php">📊 통계</a>
+    <?php } ?>
 </p>
 
 <table style="width:100%;border-collapse:collapse;" border="1" cellpadding="6">

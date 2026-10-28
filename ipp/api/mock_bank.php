@@ -33,7 +33,7 @@ if ($action === 'check') {
     if ($amount <= 0 || $merchant === '') ipp_json(false, array('msg' => '금액과 가맹점을 입력하세요.'));
 
     ipp_json(true, array(
-        'is_impulse' => ipp_detect_impulse($amount, $category, $datetime),
+        'is_impulse' => ipp_detect_impulse($amount, $category, $datetime, $merchant, $mb_id),
         'point'      => ipp_calc_point($amount),
         'point2'     => ipp_calc_point($amount, IPP_COOLDOWN_MULTIPLIER)
     ));

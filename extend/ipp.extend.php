@@ -8,6 +8,8 @@ define('IPP_USE_CHARACTER',  false);  // 캐릭터 육성
 define('IPP_USE_CHALLENGE',  false);  // 챌린지, 리더보드
 define('IPP_USE_SIMULATION', false);  // 미래가치 시뮬레이션
 define('IPP_USE_GIFTICON',   true);   // 기프티콘 리워드 교환
+define('IPP_USE_SETTING',    true);  // 회원별 차단 설정, 차단 기록
+define('IPP_USE_STATS',      true);   // 통계 화면
 
 /* ===== 포인트 기준 ===== */
 define('IPP_POINT_RATE',          0.01);  // 절약 금액의 1%
@@ -29,6 +31,21 @@ define('IPP_DETECT_NIGHT_END',   4);      // 새벽 4시 전까지를 심야로 
 define('IPP_DETECT_AMOUNT',      50000);  // 이 금액 이상이면 고액 결제
 define('IPP_DETECT_CATEGORIES',  array('shopping', 'fashion', 'game', 'delivery'));
 
+/* ===== 차단 설정 기준 ===== */
+// 차단할 수 있는 사이트 (코드 => 이름, 도메인). 크롬 확장 프로그램도 이 목록을 쓴다.
+define('IPP_BLOCK_SITES', array(
+    'naver'   => array('name' => '네이버쇼핑', 'domain' => 'shopping.naver.com'),
+    'coupang' => array('name' => '쿠팡',       'domain' => 'coupang.com'),
+    'gmarket' => array('name' => 'G마켓',      'domain' => 'gmarket.co.kr'),
+    '11st'    => array('name' => '11번가',     'domain' => '11st.co.kr'),
+    'zigzag'  => array('name' => '지그재그',   'domain' => 'zigzag.kr'),
+    'musinsa' => array('name' => '무신사',     'domain' => 'musinsa.com')
+));
+define('IPP_DEFAULT_KEYWORDS',      array('세일', '할인', '특가'));  // 새 회원의 기본 차단 키워드
+define('IPP_KEYWORD_MAX',           20);  // 키워드 최대 개수
+define('IPP_KEYWORD_LEN',           20);  // 키워드 하나의 최대 글자 수
+define('IPP_BLOCK_CUSTOM_MAX_DAYS', 30);  // 직접 설정할 수 있는 최대 차단 기간(일)
+
 /* ===== 경로 ===== */
 define('IPP_PATH', G5_PATH.'/ipp');
 define('IPP_URL',  G5_URL.'/ipp');
@@ -39,6 +56,8 @@ $g5['ipp_transaction_table'] = G5_TABLE_PREFIX.'ipp_transaction';
 $g5['ipp_cooldown_table']    = G5_TABLE_PREFIX.'ipp_cooldown';
 $g5['ipp_reward_table']      = G5_TABLE_PREFIX.'ipp_reward';
 $g5['ipp_coupon_table']      = G5_TABLE_PREFIX.'ipp_coupon';
+$g5['ipp_setting_table']     = G5_TABLE_PREFIX.'ipp_setting';
+$g5['ipp_block_log_table']   = G5_TABLE_PREFIX.'ipp_block_log';
 
 /* ===== ipp/lib 안의 파일 자동 로드 ===== */
 foreach (glob(IPP_PATH.'/lib/*.lib.php') as $ipp_lib) {

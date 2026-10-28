@@ -34,7 +34,14 @@ function ipp_bank_get_account($mb_id) {
 }
 
 // 충동구매 여부 판단 (1: 감지, 0: 정상)
-function ipp_detect_impulse($amount, $category, $datetime) {
+// $text(가맹점명/상품명)와 $mb_id를 주면 회원 키워드도 검사한다.
+// 키워드는 카테고리와 상관없이 적용한다 (확장 프로그램에서 온 상품은 카테고리를 모름)
+function ipp_detect_impulse($amount, $category, $datetime, $text = '', $mb_id = '') {
+    if (IPP_USE_SETTING && $text !== '' && $mb_id) {
+        $st = ipp_setting_get($mb_id);
+        if (ipp_keyword_match($text, $st['st_keywords']) !== '') return 1;
+    }
+
     if (!in_array($category, IPP_DETECT_CATEGORIES)) return 0;
 
     $hour     = (int)date('G', strtotime($datetime));
@@ -47,7 +54,7 @@ function ipp_detect_impulse($amount, $category, $datetime) {
 // 거래 저장 후 [거래 ID, 감지 여부] 반환
 function ipp_bank_save_transaction($mb_id, $ac_id, $type, $amount, $merchant, $category, $datetime) {
     global $g5;
-    $is_impulse = ($type === 'pay') ? ipp_detect_impulse($amount, $category, $datetime) : 0;
+    $is_impulse = ($type === 'pay') ? ipp_detect_impulse($amount, $category, $datetime, $merchant, $mb_id) : 0;
 
     sql_query(" INSERT INTO {$g5['ipp_transaction_table']}
                 SET mb_id           = '".sql_real_escape_string($mb_id)."',

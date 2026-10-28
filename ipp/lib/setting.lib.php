@@ -1,0 +1,170 @@
+<?php
+if (!defined('_GNUBOARD_')) exit;
+
+/*
+ * 회원별 차단 설정과 차단 기록
+ * 설정은 회원당 1행이며, 처음 조회할 때 기본값으로 만든다.
+ */
+
+// 회원 설정 조회 (없으면 기본값으로 생성). st_sites, st_keywords는 배열로 반환
+// $reset이 true면 캐시를 비우기만 한다 (저장 직후 호출)
+function ipp_setting_get($mb_id, $reset = false) {
+    global $g5;
+    static $cache = array();
+
+    if ($reset) { unset($cache[$mb_id]); return null; }
+    if (isset($cache[$mb_id])) return $cache[$mb_id];
+
+    $mb = sql_real_escape_string($mb_id);
+    $st = sql_fetch(" SELECT * FROM {$g5['ipp_setting_table']} WHERE mb_id = '{$mb}' ");
+
+    if (!$st) {
+        // 동시에 처음 열어도 PK 때문에 1행만 들어간다
+        $now = G5_TIME_YMDHIS;
+        sql_query(" INSERT IGNORE INTO {$g5['ipp_setting_table']}
+                    SET mb_id              = '{$mb}',
+                        st_sites           = '".sql_real_escape_string(ipp_json_encode(array_keys(IPP_BLOCK_SITES)))."',
+                        st_keywords        = '".sql_real_escape_string(ipp_json_encode(IPP_DEFAULT_KEYWORDS))."',
+                        st_risk_alert      = 1,
+                        st_api_token       = '".ipp_new_token()."',
+                        st_datetime        = '{$now}',
+                        st_update_datetime = '{$now}' ");
+        $st = sql_fetch(" SELECT * FROM {$g5['ipp_setting_table']} WHERE mb_id = '{$mb}' ");
+    }
+
+    $st['st_sites']    = ipp_json_list($st['st_sites']);
+    $st['st_keywords'] = ipp_json_list($st['st_keywords']);
+    return $cache[$mb_id] = $st;
+}
+
+// 설정 저장 (차단할 사이트, 키워드, 위험도 알림). 정리된 값으로 저장한다
+function ipp_setting_save($mb_id, $sites, $keywords, $risk_alert) {
+    global $g5;
+    ipp_setting_get($mb_id);   // 행이 없으면 먼저 만든다
+
+    $sites    = array_values(array_intersect(array_keys(IPP_BLOCK_SITES), (array)$sites));
+    $keywords = ipp_keyword_clean($keywords);
+
+    sql_query(" UPDATE {$g5['ipp_setting_table']}
+                SET st_sites           = '".sql_real_escape_string(ipp_json_encode($sites))."',
+                    st_keywords        = '".sql_real_escape_string(ipp_json_encode($keywords))."',
+                    st_risk_alert      = '".($risk_alert ? 1 : 0)."',
+                    st_update_datetime = '".G5_TIME_YMDHIS."'
+                WHERE mb_id = '".sql_real_escape_string($mb_id)."' ");
+    ipp_setting_get($mb_id, true);
+}
+
+// 키워드 정리: 앞뒤 공백 제거, 빈 값과 중복 제거, 개수와 길이 제한
+function ipp_keyword_clean($keywords) {
+    $list = array();
+    foreach ((array)$keywords as $kw) {
+        $kw = trim(preg_replace('/\s+/u', ' ', (string)$kw));
+        if ($kw === '') continue;
+        $kw = mb_substr($kw, 0, IPP_KEYWORD_LEN, 'UTF-8');
+        if (!in_array($kw, $list)) $list[] = $kw;
+        if (count($list) >= IPP_KEYWORD_MAX) break;
+    }
+    return $list;
+}
+
+// 차단 시작. $preset: 1h(1시간), today(오늘 하루), week(일주일), custom(직접 설정)
+// 성공하면 종료 시각, 잘못된 값이면 false 반환
+function ipp_block_start($mb_id, $preset, $custom_until = '') {
+    global $g5;
+    $now = G5_SERVER_TIME;
+
+    if ($preset === '1h')         $until = $now + 3600;
+    else if ($preset === 'today') $until = strtotime(G5_TIME_YMD.' 23:59:59');
+    else if ($preset === 'week')  $until = $now + 7 * 86400;
+    else if ($preset === 'custom') {
+        $until = strtotime($custom_until);
+        if (!$until || $until <= $now || $until > $now + IPP_BLOCK_CUSTOM_MAX_DAYS * 86400) return false;
+    }
+    else return false;
+
+    ipp_setting_get($mb_id);
+    $until = date('Y-m-d H:i:s', $until);
+    sql_query(" UPDATE {$g5['ipp_setting_table']}
+                SET st_block_start     = '".G5_TIME_YMDHIS."',
+                    st_block_until     = '{$until}',
+                    st_update_datetime = '".G5_TIME_YMDHIS."'
+                WHERE mb_id = '".sql_real_escape_string($mb_id)."' ");
+    ipp_setting_get($mb_id, true);
+    return $until;
+}
+
+// 차단 해제 (종료 시각을 지금으로 당긴다)
+function ipp_block_stop($mb_id) {
+    global $g5;
+    sql_query(" UPDATE {$g5['ipp_setting_table']}
+                SET st_block_until     = '".G5_TIME_YMDHIS."',
+                    st_update_datetime = '".G5_TIME_YMDHIS."'
+                WHERE mb_id = '".sql_real_escape_string($mb_id)."'
+                  AND st_block_until > '".G5_TIME_YMDHIS."' ");
+    ipp_setting_get($mb_id, true);
+}
+
+// 지금 차단 중인지. $site를 주면 그 사이트가 차단 목록에 있어야 true
+function ipp_is_blocking($mb_id, $site = '') {
+    if (!IPP_USE_SETTING || !$mb_id) return false;
+
+    $st = ipp_setting_get($mb_id);
+    if (!$st['st_block_until'] || $st['st_block_until'] <= G5_TIME_YMDHIS) return false;
+    if ($site !== '' && !in_array($site, $st['st_sites'])) return false;
+    return true;
+}
+
+// $text에 들어 있는 첫 키워드 반환 (대소문자 무시). 없으면 ''
+function ipp_keyword_match($text, $keywords) {
+    if ($text === '') return '';
+    foreach ($keywords as $kw) {
+        if ($kw !== '' && mb_stripos($text, $kw, 0, 'UTF-8') !== false) return $kw;
+    }
+    return '';
+}
+
+// 차단 기록 저장. 잘못된 사이트 코드나 이벤트면 0, 성공하면 bl_id 반환
+function ipp_block_log_add($mb_id, $site, $url, $item_name, $price, $event, $stay_sec = 0) {
+    global $g5;
+    if (!IPP_USE_SETTING) return 0;
+    if (!isset(IPP_BLOCK_SITES[$site])) return 0;
+    if (!in_array($event, array('visit', 'blocked', 'checkout'))) return 0;
+
+    sql_query(" INSERT INTO {$g5['ipp_block_log_table']}
+                SET mb_id        = '".sql_real_escape_string($mb_id)."',
+                    bl_site      = '".sql_real_escape_string($site)."',
+                    bl_url       = '".sql_real_escape_string(mb_substr($url, 0, 500, 'UTF-8'))."',
+                    bl_item_name = '".sql_real_escape_string(mb_substr($item_name, 0, 255, 'UTF-8'))."',
+                    bl_price     = '".max(0, (int)$price)."',
+                    bl_event     = '{$event}',
+                    bl_stay_sec  = '".max(0, (int)$stay_sec)."',
+                    bl_datetime  = '".G5_TIME_YMDHIS."' ");
+    return sql_insert_id();
+}
+
+// 확장 프로그램 토큰 재발급. 새 토큰 반환
+function ipp_setting_regen_token($mb_id) {
+    global $g5;
+    ipp_setting_get($mb_id);
+    $token = ipp_new_token();
+    sql_query(" UPDATE {$g5['ipp_setting_table']}
+                SET st_api_token       = '{$token}',
+                    st_update_datetime = '".G5_TIME_YMDHIS."'
+                WHERE mb_id = '".sql_real_escape_string($mb_id)."' ");
+    ipp_setting_get($mb_id, true);
+    return $token;
+}
+
+function ipp_new_token() {
+    return bin2hex(random_bytes(32));
+}
+
+function ipp_json_encode($list) {
+    return json_encode(array_values($list), JSON_UNESCAPED_UNICODE);
+}
+
+// JSON 배열 문자열을 PHP 배열로. 깨진 값이면 빈 배열
+function ipp_json_list($json) {
+    $list = json_decode((string)$json, true);
+    return is_array($list) ? $list : array();
+}
