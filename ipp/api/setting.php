@@ -41,10 +41,17 @@ if ($action === 'unblock') {
     ipp_json(true);
 }
 
-// 확장 프로그램 토큰 재발급
+// 확장 프로그램 토큰 발급/재발급. 평문 토큰은 이 응답에서 한 번만 내려간다
 if ($action === 'regen_token') {
+    if (!IPP_USE_EXTENSION) ipp_json(false, array('msg' => '확장 프로그램 연결 기능이 꺼져 있습니다.'));
     $token = ipp_setting_regen_token($mb_id);
-    ipp_json(true, array('token_head' => substr($token, 0, 8)));
+    ipp_json(true, array('token' => $token, 'server' => G5_URL));
+}
+
+// 확장 프로그램 연결 해제
+if ($action === 'revoke_token') {
+    ipp_setting_revoke_token($mb_id);
+    ipp_json(true);
 }
 
 ipp_json(false, array('msg' => '알 수 없는 요청입니다.'));

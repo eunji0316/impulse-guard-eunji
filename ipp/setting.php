@@ -62,11 +62,34 @@ include_once(G5_PATH.'/head.php');
 <p><button type="submit" style="padding:8px 20px;">저장</button></p>
 </form>
 
+<?php if (IPP_USE_EXTENSION) { ?>
 <h3>확장 프로그램 연결</h3>
 <p>
-    토큰 <code><?php echo substr($st['st_api_token'], 0, 8); ?>…</code>
-    <button type="button" onclick="if (confirm('토큰을 새로 만들면 기존 확장 프로그램 연결이 끊깁니다.')) ippPost({ action: 'regen_token' })">재발급</button>
+    <?php if (!$st['st_api_token']) { ?>
+        토큰이 발급되지 않았습니다.
+        <button type="button" onclick="ippIssueToken(false)">발급</button>
+    <?php } else { ?>
+        발급 <?php echo $st['st_token_datetime']; ?>
+        &nbsp;·&nbsp;
+        <?php echo $st['st_token_used_datetime'] ? '마지막 사용 '.$st['st_token_used_datetime'] : '아직 연결되지 않음'; ?>
+        <br>
+        <button type="button" onclick="ippIssueToken(true)">재발급</button>
+        <button type="button" onclick="if (confirm('확장 프로그램 연결을 해제할까요?')) ippPost({ action: 'revoke_token' })">연결 해제</button>
+    <?php } ?>
 </p>
+<div id="ipp_token_box" style="display:none;border:1px solid #f0c36d;background:#fff8e1;padding:12px;border-radius:6px;">
+    <p style="margin:0 0 8px;">확장 프로그램 팝업에 아래 두 값을 입력하세요. <b>이 화면을 벗어나면 토큰을 다시 볼 수 없습니다.</b></p>
+    <p style="margin:4px 0;">서버 주소
+        <input type="text" id="ipp_token_server" readonly style="width:60%;">
+        <button type="button" onclick="ippCopy('ipp_token_server')">복사</button>
+    </p>
+    <p style="margin:4px 0;">토큰
+        <input type="text" id="ipp_token_value" readonly style="width:60%;font-family:monospace;">
+        <button type="button" onclick="ippCopy('ipp_token_value')">복사</button>
+    </p>
+    <p style="margin:8px 0 0;"><button type="button" onclick="location.reload()">확인했습니다</button></p>
+</div>
+<?php } ?>
 </div>
 
 <script>
@@ -81,6 +104,26 @@ function ippBlock(preset) {
     const until = document.getElementById('ipp_until').value;
     if (preset === 'custom' && !until) { alert('종료 시각을 선택하세요.'); return; }
     ippPost({ action: 'block', preset: preset, until: until });
+}
+// 토큰은 응답에서 한 번만 받으므로 새로고침하지 않고 바로 보여 준다
+function ippIssueToken(is_regen) {
+    if (is_regen && !confirm('토큰을 새로 만들면 기존 확장 프로그램 연결이 끊깁니다.')) return;
+    const fd = new FormData();
+    fd.append('action', 'regen_token');
+    fetch('<?php echo IPP_URL; ?>/api/setting.php', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.ok) { alert(res.msg); return; }
+            document.getElementById('ipp_token_server').value = res.server;
+            document.getElementById('ipp_token_value').value  = res.token;
+            document.getElementById('ipp_token_box').style.display = 'block';
+        });
+}
+function ippCopy(id) {
+    const el = document.getElementById(id);
+    el.select();
+    if (navigator.clipboard) navigator.clipboard.writeText(el.value);
+    else document.execCommand('copy');
 }
 function ippSave(form) {
     const fd = new FormData(form);

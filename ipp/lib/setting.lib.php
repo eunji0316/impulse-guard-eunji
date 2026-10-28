@@ -26,7 +26,6 @@ function ipp_setting_get($mb_id, $reset = false) {
                         st_sites           = '".sql_real_escape_string(ipp_json_encode(array_keys(IPP_BLOCK_SITES)))."',
                         st_keywords        = '".sql_real_escape_string(ipp_json_encode(IPP_DEFAULT_KEYWORDS))."',
                         st_risk_alert      = 1,
-                        st_api_token       = '".ipp_new_token()."',
                         st_datetime        = '{$now}',
                         st_update_datetime = '{$now}' ");
         $st = sql_fetch(" SELECT * FROM {$g5['ipp_setting_table']} WHERE mb_id = '{$mb}' ");
@@ -142,21 +141,61 @@ function ipp_block_log_add($mb_id, $site, $url, $item_name, $price, $event, $sta
     return sql_insert_id();
 }
 
-// 확장 프로그램 토큰 재발급. 새 토큰 반환
+// 확장 프로그램 토큰 발급/재발급. DB에는 해시만 저장하고 평문 토큰을 반환한다 (화면에 한 번만 보여 줌)
 function ipp_setting_regen_token($mb_id) {
     global $g5;
     ipp_setting_get($mb_id);
     $token = ipp_new_token();
     sql_query(" UPDATE {$g5['ipp_setting_table']}
-                SET st_api_token       = '{$token}',
-                    st_update_datetime = '".G5_TIME_YMDHIS."'
+                SET st_api_token           = '".ipp_token_hash($token)."',
+                    st_token_datetime      = '".G5_TIME_YMDHIS."',
+                    st_token_used_datetime = NULL,
+                    st_update_datetime     = '".G5_TIME_YMDHIS."'
                 WHERE mb_id = '".sql_real_escape_string($mb_id)."' ");
     ipp_setting_get($mb_id, true);
     return $token;
 }
 
+// 확장 프로그램 연결 해제 (토큰 삭제)
+function ipp_setting_revoke_token($mb_id) {
+    global $g5;
+    sql_query(" UPDATE {$g5['ipp_setting_table']}
+                SET st_api_token           = NULL,
+                    st_token_datetime      = NULL,
+                    st_token_used_datetime = NULL,
+                    st_update_datetime     = '".G5_TIME_YMDHIS."'
+                WHERE mb_id = '".sql_real_escape_string($mb_id)."' ");
+    ipp_setting_get($mb_id, true);
+}
+
+// 토큰으로 회원 찾기. 탈퇴/차단 회원이거나 토큰이 틀리면 null
+function ipp_token_member($token) {
+    global $g5;
+    if (!preg_match('/^[0-9a-f]{64}$/', (string)$token)) return null;
+
+    $st = sql_fetch(" SELECT mb_id, st_token_used_datetime FROM {$g5['ipp_setting_table']}
+                      WHERE st_api_token = '".ipp_token_hash($token)."' ");
+    if (!$st) return null;
+
+    $mb = get_member($st['mb_id']);
+    if (!$mb || !$mb['mb_id'] || $mb['mb_leave_date'] || $mb['mb_intercept_date']) return null;
+
+    // 마지막 사용 시각은 IPP_TOKEN_TOUCH_SEC마다 한 번만 갱신
+    $used = $st['st_token_used_datetime'] ? strtotime($st['st_token_used_datetime']) : 0;
+    if (G5_SERVER_TIME - $used >= IPP_TOKEN_TOUCH_SEC) {
+        sql_query(" UPDATE {$g5['ipp_setting_table']}
+                    SET st_token_used_datetime = '".G5_TIME_YMDHIS."'
+                    WHERE mb_id = '".sql_real_escape_string($mb['mb_id'])."' ");
+    }
+    return $mb;
+}
+
 function ipp_new_token() {
     return bin2hex(random_bytes(32));
+}
+
+function ipp_token_hash($token) {
+    return hash('sha256', $token);
 }
 
 function ipp_json_encode($list) {

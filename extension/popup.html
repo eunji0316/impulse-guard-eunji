@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>impulse-guard</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>impulse-guard</h1>
+
+  <label for="server">서버 주소</label>
+  <input type="url" id="server" placeholder="http://localhost:8000">
+
+  <label for="token">API 토큰</label>
+  <div class="row">
+    <input type="password" id="token" placeholder="설정 화면에서 발급한 토큰" autocomplete="off" spellcheck="false">
+    <button type="button" id="toggle" class="small">보기</button>
+  </div>
+
+  <button type="button" id="save">저장 후 연결 테스트</button>
+  <button type="button" id="clear" class="secondary">연결 해제</button>
+
+  <p id="status" class="status"></p>
+
+  <script src="popup.js"></script>
+</body>
+</html>

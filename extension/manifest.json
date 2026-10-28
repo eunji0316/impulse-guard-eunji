@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "impulse-guard",
+  "version": "0.1.0",
+  "description": "쇼핑 사이트에서 결제 직전에 충동구매를 한 번 더 생각하게 돕는 확장 프로그램",
+  "action": {
+    "default_title": "impulse-guard",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
+}
