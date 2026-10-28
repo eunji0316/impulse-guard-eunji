@@ -90,7 +90,7 @@ if ($action === 'check') {
     $st = ipp_setting_get($mb_id);
     ipp_ext_json(200, true, array(
         'is_blocking' => ipp_is_blocking($mb_id, $site),
-        'is_impulse'  => ipp_detect_impulse($price, '', G5_TIME_YMDHIS, $item_name, $mb_id),
+        'is_impulse'  => ipp_detect_impulse($price, 'shopping', G5_TIME_YMDHIS, $item_name, $mb_id),   // 차단 사이트는 모두 쇼핑몰
         'keyword'     => IPP_USE_SETTING ? ipp_keyword_match($item_name, $st['st_keywords']) : '',
         'point'       => ipp_calc_point($price),
         'point2'      => ipp_calc_point($price, IPP_COOLDOWN_MULTIPLIER)
@@ -117,6 +117,18 @@ if ($action === 'cooldown') {
     $cd_id = ipp_cooldown_create($mb_id, mb_substr($item_name, 0, 255, 'UTF-8'), $price);
     $cd    = ipp_cooldown_get($cd_id);
     ipp_ext_json(200, true, array('cd_id' => $cd_id, 'expire' => $cd['cd_expire_datetime']));
+}
+
+// 안 살래요 (즉시 포기, 포인트 바로 지급. 웹의 ipp/api/cooldown.php giveup과 같은 처리)
+if ($action === 'giveup') {
+    if (!IPP_USE_COOLDOWN) ipp_ext_json(403, false, array('msg' => '쿨다운 기능이 꺼져 있습니다.'));
+    $item_name = ipp_ext_str($body, 'item_name');
+    $price     = ipp_ext_int($body, 'price');
+    if ($item_name === '' || $price <= 0) ipp_ext_json(400, false, array('msg' => '상품명과 가격을 보내 주세요.'));
+
+    $cd_id = ipp_cooldown_create($mb_id, mb_substr($item_name, 0, 255, 'UTF-8'), $price);
+    $point = ipp_cooldown_finish(ipp_cooldown_get($cd_id), 'gaveup');
+    ipp_ext_json(200, true, array('cd_id' => $cd_id, 'point' => $point));
 }
 
 ipp_ext_json(400, false, array('msg' => '알 수 없는 요청입니다.'));

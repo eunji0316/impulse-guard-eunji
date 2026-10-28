@@ -1,11 +1,13 @@
 /*
  * impulse-guard 백그라운드 (service worker)
  * 서버 호출은 모두 여기서 한다. host_permissions가 있는 주소는 CORS 제한 없이 요청할 수 있다.
- * 팝업과 (3-2의) content script는 chrome.runtime.sendMessage({ type: 'ipp:api', action, data })로 요청한다.
+ * 팝업과 content script는 chrome.runtime.sendMessage({ type: 'ipp:api', action, data })로 요청한다.
+ * content script의 차단 팝업은 { type: 'ipp:open', path }로 서버의 정해진 화면을 새 탭으로 연다.
  */
 
 const IPP_DEFAULT_SERVER = 'http://localhost:8000';
 const IPP_TIMEOUT_MS     = 10000;
+const IPP_OPEN_PATHS     = ['/ipp/cooldown.php'];   // ipp:open으로 열 수 있는 서버 화면
 
 // 저장된 서버 주소와 토큰
 async function ippGetConfig() {
@@ -42,7 +44,13 @@ async function ippApi(action, data = {}) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;   // 다른 확장 프로그램의 메시지는 무시
-  if (!msg || msg.type !== 'ipp:api') return false;
+  if (!msg) return false;
+
+  if (msg.type === 'ipp:open' && IPP_OPEN_PATHS.includes(msg.path)) {
+    ippGetConfig().then(({ server }) => chrome.tabs.create({ url: server + msg.path }));
+    return false;
+  }
+  if (msg.type !== 'ipp:api') return false;
 
   ippApi(msg.action, msg.data || {}).then(sendResponse);
   return true;   // 비동기 응답
