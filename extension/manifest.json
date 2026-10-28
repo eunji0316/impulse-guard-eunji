@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "impulse-guard",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "쇼핑 사이트에서 결제 직전에 충동구매를 한 번 더 생각하게 돕는 확장 프로그램",
   "action": {
     "default_title": "impulse-guard",

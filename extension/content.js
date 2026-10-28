@@ -9,6 +9,9 @@
 (() => {
   const CLICKABLE = 'button, a, input[type="submit"], input[type="button"], [role="button"]';
 
+  // 크롬에 로드된 버전 확인용 (확장 프로그램을 고친 뒤 새로고침이 반영됐는지 페이지 콘솔에서 바로 보인다)
+  try { console.info('[impulse-guard] content script', chrome.runtime.getManifest().version); } catch (e) { /* 연결 끊김 */ }
+
   let visit  = null;    // { match, url, item, start, sent } 상품 페이지 방문
   let modal  = null;    // { match, item, start, logged, host } 떠 있는 차단 팝업
   let wall   = null;    // { match, url, until, start, logged, host, timer } 떠 있는 차단 모드 화면

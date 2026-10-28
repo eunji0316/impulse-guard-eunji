@@ -84,11 +84,11 @@ const IPP_SITES = {
         urlParams: [],
         name: [],                            // 확인 필요 (지금은 og:title로 읽음)
         price: [
-          '[class*="FinalPrice"]',           // 확인 필요
-          '[class*="final-price"]'           // 확인 필요
+          '[class*="FinalPrice"]',           // 2026-10-28 확인: 0개 (실제 가격 위치는 아직 모름)
+          '[class*="final-price"]'           // 2026-10-28 확인: 0개
         ],
         image: [
-          'img[alt*="상품"]'                 // 확인 필요
+          'img[alt*="상품"]'                 // 2026-10-28 확인
         ],
         buttons: {
           selectors: [],
