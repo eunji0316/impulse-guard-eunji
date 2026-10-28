@@ -1,15 +1,17 @@
 /*
- * content script: 쇼핑 페이지에서 상품 정보 추출, 방문 기록, 결제 버튼 가로채기, 차단 팝업
+ * content script: 쇼핑 페이지에서 상품 정보 추출, 방문 기록, 결제 버튼 가로채기, 차단 팝업, 차단 모드
  * - 선택자는 sites.js의 IPP_SITES에 있다. 이 파일에는 사이트별 값을 두지 않는다.
  * - 서버 호출은 background.js에 메시지로 맡긴다.
  * - document_start에 실행해서 페이지 스크립트보다 먼저 클릭 리스너를 단다.
  * - 서버에 연결되지 않으면(토큰 없음, 서버 꺼짐) 구매를 막지 않는다.
+ * - 차단 모드: 회원이 정한 차단 시간 중이고 이 사이트가 차단 목록에 있으면 사이트 전체를 전체 화면 안내로 가린다.
  */
 (() => {
   const CLICKABLE = 'button, a, input[type="submit"], input[type="button"], [role="button"]';
 
-  let visit  = null;    // { match, start, sent } 상품 페이지 방문
+  let visit  = null;    // { match, url, item, start, sent } 상품 페이지 방문
   let modal  = null;    // { match, item, start, logged, host } 떠 있는 차단 팝업
+  let wall   = null;    // { match, url, until, start, logged, host, timer } 떠 있는 차단 모드 화면
   let busy   = false;   // 서버 확인 중이거나 팝업이 떠 있음
   let bypass = false;   // '그래도 구매하기'로 원래 클릭을 다시 보내는 중
 
@@ -24,6 +26,14 @@
       }
     }
     return null;
+  }
+
+  // 현재 주소의 사이트 코드. 차단 모드는 페이지 종류와 상관없이 사이트 전체에 적용한다. 없으면 ''
+  function matchSite() {
+    for (const [code, site] of Object.entries(IPP_SITES)) {
+      if (site.hosts.includes(location.hostname)) return code;
+    }
+    return '';
   }
 
   // 선택자 배열에서 처음으로 요소가 있는 선택자의 요소 목록
@@ -70,7 +80,7 @@
 
     return {
       name:  name.slice(0, 255),
-      price: parsePrice(textOf(findAll(page.price)[0])),
+      price: parsePrice(textOf(findAll(page.price)[0]) || metaOf('product:price:amount')),
       image: absUrl(src || metaOf('og:image'))
     };
   }
@@ -114,9 +124,9 @@
 
   /* ===== 서버 호출 (background.js) ===== */
 
-  function api(action, data) {
+  function send(msg) {
     try {
-      return chrome.runtime.sendMessage({ type: 'ipp:api', action, data })
+      return chrome.runtime.sendMessage(msg)
         .catch(() => ({ ok: false, status: 0, msg: '확장 프로그램에 연결할 수 없습니다.' }));
     } catch (e) {
       // 확장 프로그램을 새로고침하면 이미 열린 페이지의 content script는 연결이 끊긴다
@@ -124,9 +134,14 @@
     }
   }
 
-  function log(match, event, item, staySec) {
+  const api        = (action, data) => send({ type: 'ipp:api', action, data });
+  const getSetting = (force) => send({ type: 'ipp:setting', force: !!force });   // 5분 캐시 (background.js)
+
+  // url: SPA에서 주소가 이미 바뀐 뒤 기록할 때는 이전 주소를 넘긴다
+  // page: 페이지 종류(product, cart). sites.js에 없는 페이지(사이트 홈 등)는 ''. 통계에서 상품 차단과 사이트 차단을 나눈다
+  function log(match, event, item, staySec, url) {
     return api('log', {
-      site: match.code, url: cleanUrl(match.page), item_name: item.name,
+      site: match.code, page: match.type || '', url: url || cleanUrl(match.page || {}), item_name: item.name,
       price: item.price, event, stay_sec: staySec
     });
   }
@@ -135,13 +150,17 @@
 
   function startVisit() {
     const match = matchPage();
-    visit = (match && match.page.logVisit) ? { match, start: Date.now(), sent: false } : null;
+    visit = (match && match.page.logVisit && !wall)
+      ? { match, url: cleanUrl(match.page), item: null, start: Date.now(), sent: false }
+      : null;
   }
 
-  function endVisit() {
+  // snapshot: SPA 주소 변경처럼 화면이 이미 다음 페이지로 바뀌었으면, 마지막으로 읽어 둔 상품 정보를 쓴다
+  function endVisit(snapshot) {
     if (!visit || visit.sent) return;
     visit.sent = true;
-    log(visit.match, 'visit', extract(visit.match.page), secFrom(visit.start));
+    const item = snapshot ? visit.item : extract(visit.match.page);
+    if (item) log(visit.match, 'visit', item, secFrom(visit.start), visit.url);
   }
 
   // 차단 팝업을 본 시간과 함께 blocked 기록 (선택했거나 페이지를 떠날 때 한 번)
@@ -151,9 +170,34 @@
     log(modal.match, 'blocked', modal.item, secFrom(modal.start));
   }
 
-  addEventListener('pagehide', () => { endBlocked(); endVisit(); });
-  addEventListener('pageshow', (e) => { if (e.persisted) startVisit(); });   // 뒤로 가기 캐시에서 돌아옴
+  addEventListener('pagehide', () => { endBlocked(); endWall(); endVisit(); });
+  addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;   // 뒤로 가기 캐시에서 돌아옴
+    if (wall) {
+      wall.start  = Date.now();   // 다시 보게 된 차단 화면은 새 차단으로 기록
+      wall.logged = false;
+    } else {
+      startVisit();
+      checkWall();
+    }
+  });
   startVisit();
+  checkWall();
+
+  // SPA(지그재그 등)는 페이지를 새로 불러오지 않고 주소만 바꾼다. 1초마다 주소를 확인해 방문 기록을 나누고 차단 여부를 다시 본다
+  let lastUrl = location.href;
+  setInterval(() => {
+    if (location.href === lastUrl) {
+      if (visit && !visit.sent) visit.item = extract(visit.match.page);   // 주소가 바뀌기 전 마지막 화면의 상품 정보
+      return;
+    }
+    lastUrl = location.href;
+    endVisit(true);
+    if (!wall) {
+      startVisit();
+      checkWall();
+    }
+  }, 1000);
 
   /* ===== 결제 버튼 가로채기 ===== */
 
@@ -166,16 +210,18 @@
 
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (busy) return;   // 확인 중에 다시 누른 클릭은 버린다
+    if (busy || wall) return;   // 확인 중에 다시 누른 클릭, 차단 화면 뒤에서 키보드로 누른 클릭은 버린다
     busy = true;
 
     const item = extract(match.page);
+    if (item.price <= 0) console.warn('[impulse-guard] 가격을 읽지 못했습니다. sites.js의 price 선택자를 확인하세요 (ippInspect()).');
     const res  = await api('check', { site: match.code, item_name: item.name, price: item.price });
     if (!res.ok) {
       console.warn('[impulse-guard] 확인하지 못해 그대로 진행합니다:', res.msg);
       return proceed(match, btn, item);
     }
-    if (!res.data.is_blocking && !res.data.is_impulse) return proceed(match, btn, item);
+    // 가격을 못 읽으면 고액인지 알 수 없으므로 안전으로 보지 않고 팝업을 띄운다 (선택자가 깨져도 조용히 꺼지지 않게)
+    if (!res.data.is_blocking && !res.data.is_impulse && item.price > 0) return proceed(match, btn, item);
     showModal(match, btn, item, res.data);
   }, true);
 
@@ -263,6 +309,7 @@
     if (d.is_blocking) reasons.push('지금은 쇼핑 차단 시간이에요.');
     if (d.keyword)     reasons.push('\'' + d.keyword + '\' 키워드가 들어 있어요.');
     else if (d.is_impulse) reasons.push('심야 시간이거나 큰 금액의 결제예요.');
+    if (!reasons.length && item.price <= 0) reasons.push('큰 금액의 결제인지 확인할 수 없어요. 한 번 더 생각해 볼까요?');   // 가격 칸에는 '가격을 읽지 못했어요'가 나온다
     $('.reason').textContent = reasons.join(' ');
     if (item.price > 0) {
       $('.point').textContent = '안 사면 +' + d.point.toLocaleString() + 'P, 24시간 참으면 +' + d.point2.toLocaleString() + 'P';
@@ -330,6 +377,130 @@
     (document.body || document.documentElement).appendChild(host);
     modal = { match, item, start: Date.now(), logged: false, host };
     $('.think').disabled ? $('.giveup').focus() : $('.think').focus();
+  }
+
+  /* ===== 차단 모드 (차단 시간 중 차단 사이트에 들어오면 전체 화면 안내) ===== */
+
+  const WALL_HTML = `
+<style>
+  .back { position: fixed; inset: 0; background: #f3f5fa; display: flex; align-items: center; justify-content: center; padding: 16px;
+          font: 15px/1.6 -apple-system, 'Malgun Gothic', sans-serif; color: #222; overflow: auto; }
+  .box { width: 100%; max-width: 420px; text-align: center; }
+  .icon { font-size: 48px; line-height: 1; }
+  h2 { margin: 14px 0 6px; font-size: 22px; }
+  .until { margin: 0; color: #555; }
+  .remain { margin: 22px 0 6px; font-size: 13px; color: #777; }
+  .time { margin: 0 0 22px; font-size: 34px; font-weight: bold; color: #3b6cf6; font-variant-numeric: tabular-nums; }
+  .cheer { margin: 0 0 22px; color: #555; }
+  button { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 0; border-radius: 8px; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .closetab { background: #3b6cf6; color: #fff; font-weight: bold; }
+  .setting { background: #e8eefe; color: #2448c4; }
+  .recheck { background: none; color: #888; font-size: 13px; text-decoration: underline; }
+  .msg { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: #c62828; }
+</style>
+<div class="back">
+  <div class="box" role="alertdialog" aria-modal="true" aria-labelledby="ipp-wall-title" aria-describedby="ipp-wall-until">
+    <div class="icon" aria-hidden="true">⏳</div>
+    <h2 id="ipp-wall-title">지금은 쇼핑 차단 시간이에요</h2>
+    <p class="until" id="ipp-wall-until"></p>
+    <p class="remain">남은 시간</p>
+    <p class="time" role="timer"></p>
+    <p class="cheer">스스로 정한 약속을 지키는 중이에요. 조금만 더 참아 봐요!</p>
+    <button type="button" class="closetab">이 탭 닫기</button>
+    <button type="button" class="setting">차단 설정 보기</button>
+    <button type="button" class="recheck">설정에서 차단을 풀었다면 다시 확인</button>
+    <p class="msg" role="status"></p>
+  </div>
+</div>`;
+
+  // 설정 응답에서 이 사이트의 차단 종료 시각(ms). 차단 중이 아니거나 사이트가 꺼져 있으면 0
+  function blockUntil(res, code) {
+    if (!res.ok || !res.data.is_blocking) return 0;
+    const site = (res.data.sites || []).find((s) => s.code === code);
+    return (site && site.on && res.data.block_until_ms > Date.now()) ? res.data.block_until_ms : 0;
+  }
+
+  // 1시간 2분 3초 / 2일 3시간 4분 5초
+  function formatRemain(ms) {
+    let s = Math.max(0, Math.ceil(ms / 1000));
+    const d = Math.floor(s / 86400); s %= 86400;
+    const h = Math.floor(s / 3600);  s %= 3600;
+    const m = Math.floor(s / 60);    s %= 60;
+    const parts = [];
+    if (d) parts.push(d + '일');
+    if (d || h) parts.push(h + '시간');
+    if (d || h || m) parts.push(m + '분');
+    parts.push(s + '초');
+    return parts.join(' ');
+  }
+
+  // 서버(캐시)에 물어보고 차단 중이면 차단 화면을 띄운다. 서버에 연결되지 않으면 막지 않는다
+  async function checkWall() {
+    const code = matchSite();
+    if (!code || wall) return;
+    const res = await getSetting(false);
+    if (!res.ok) return console.warn('[impulse-guard] 차단 설정을 확인하지 못했습니다:', res.msg);
+    const until = blockUntil(res, code);
+    if (until && !wall) showWall(code, until, res.data.sites.find((s) => s.code === code).name);
+  }
+
+  // 차단 화면을 본 시간과 함께 blocked 기록 (화면이 닫히거나 페이지를 떠날 때 한 번)
+  // 상품/장바구니 페이지면 상품 정보를, 다른 페이지면 주소만 남긴다
+  function endWall() {
+    if (!wall || wall.logged) return;
+    wall.logged = true;
+    const item = wall.match.page ? extract(wall.match.page) : { name: '', price: 0 };
+    log(wall.match, 'blocked', item, secFrom(wall.start), wall.url);
+  }
+
+  function showWall(code, until, siteName) {
+    const page  = matchPage();
+    const match = { code, type: page ? page.type : '', page: page ? page.page : null };
+
+    const host = document.createElement('div');
+    host.style.cssText = 'all: initial; position: fixed; inset: 0; z-index: 2147483647;';
+    const root = host.attachShadow({ mode: 'closed' });
+    root.innerHTML = WALL_HTML;
+    const $ = (sel) => root.querySelector(sel);
+
+    const untilText = () => new Date(wall.until).toLocaleString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    function tick() {
+      const left = wall.until - Date.now();
+      if (left <= 0) return closeWall();   // 차단 시간이 끝나면 저절로 풀린다
+      $('.time').textContent  = formatRemain(left);
+      $('.until').textContent = siteName + ' 차단은 ' + untilText() + '에 끝나요.';
+    }
+
+    function closeWall() {
+      endWall();
+      clearInterval(wall.timer);
+      host.remove();
+      wall = null;
+      startVisit();
+    }
+
+    $('.closetab').addEventListener('click', () => send({ type: 'ipp:closeTab' }));
+    $('.setting').addEventListener('click', () => send({ type: 'ipp:open', path: '/ipp/setting.php' }));
+    $('.recheck').addEventListener('click', async () => {
+      $('.recheck').disabled = true;
+      $('.msg').textContent = '확인 중…';
+      const res = await getSetting(true);   // 캐시를 건너뛰고 서버에서 다시 받는다
+      $('.recheck').disabled = false;
+      if (!res.ok) return ($('.msg').textContent = res.msg);
+      const next = blockUntil(res, code);
+      if (!next) return closeWall();
+      wall.until = next;
+      tick();
+      $('.msg').textContent = '아직 차단 시간이에요.';
+    });
+
+    visit = null;   // 차단 화면 뒤의 페이지는 방문으로 세지 않는다
+    (document.body || document.documentElement).appendChild(host);
+    wall = { match, url: cleanUrl(page ? page.page : {}), until, start: Date.now(), logged: false, host, timer: 0 };
+    wall.timer = setInterval(tick, 1000);
+    tick();
+    if (wall) $('.closetab').focus();
   }
 
   /* ===== 선택자 확인용 (개발자 도구 콘솔에서 impulse-guard 컨텍스트를 고르고 ippInspect() 실행) ===== */

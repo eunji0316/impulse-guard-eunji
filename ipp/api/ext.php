@@ -71,12 +71,14 @@ if ($action === 'setting') {
     foreach (IPP_BLOCK_SITES as $code => $site) {
         $sites[] = array('code' => $code, 'name' => $site['name'], 'domain' => $site['domain'], 'on' => in_array($code, $st['st_sites']));
     }
+    $blocking = ipp_is_blocking($mb_id);
     ipp_ext_json(200, true, array(
-        'is_blocking' => ipp_is_blocking($mb_id),
-        'block_until' => ipp_is_blocking($mb_id) ? $st['st_block_until'] : null,
-        'sites'       => $sites,
-        'keywords'    => $st['st_keywords'],
-        'risk_alert'  => (bool)$st['st_risk_alert']
+        'is_blocking'  => $blocking,
+        'block_until'  => $blocking ? $st['st_block_until'] : null,
+        'block_remain' => $blocking ? max(0, strtotime($st['st_block_until']) - G5_SERVER_TIME) : 0,   // 남은 초. 확장 프로그램은 PC 시계와 상관없이 이 값으로 종료 시각을 계산한다
+        'sites'        => $sites,
+        'keywords'     => $st['st_keywords'],
+        'risk_alert'   => (bool)$st['st_risk_alert']
     ));
 }
 
@@ -102,8 +104,9 @@ if ($action === 'log') {
     if (!IPP_USE_SETTING) ipp_ext_json(403, false, array('msg' => '차단 설정 기능이 꺼져 있습니다.'));
     $bl_id = ipp_block_log_add($mb_id,
         ipp_ext_str($body, 'site'), ipp_ext_str($body, 'url'), ipp_ext_str($body, 'item_name'),
-        ipp_ext_int($body, 'price'), ipp_ext_str($body, 'event'), ipp_ext_int($body, 'stay_sec'));
-    if (!$bl_id) ipp_ext_json(400, false, array('msg' => '사이트나 이벤트 값이 올바르지 않습니다.'));
+        ipp_ext_int($body, 'price'), ipp_ext_str($body, 'event'), ipp_ext_int($body, 'stay_sec'),
+        ipp_ext_str($body, 'page'));
+    if (!$bl_id) ipp_ext_json(400, false, array('msg' => '사이트, 이벤트, 페이지 값이 올바르지 않습니다.'));
     ipp_ext_json(200, true, array('bl_id' => $bl_id));
 }
 

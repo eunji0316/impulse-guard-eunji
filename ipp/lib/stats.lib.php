@@ -12,10 +12,21 @@ function ipp_stats_since($days) {
     return date('Y-m-d', G5_SERVER_TIME - ($days - 1) * 86400).' 00:00:00';
 }
 
-// 오늘 차단된 상품 수 (같은 URL은 1개로 셈)
+// 오늘 차단된 상품 수: 상품 상세 페이지에서 막은 것만 (같은 URL은 1개로 셈)
 function ipp_stats_today_blocked($mb_id) {
     global $g5;
     $row = sql_fetch(" SELECT COUNT(DISTINCT bl_url) AS cnt FROM {$g5['ipp_block_log_table']}
+                       WHERE mb_id = '".sql_real_escape_string($mb_id)."'
+                         AND bl_event = 'blocked'
+                         AND bl_page = 'product'
+                         AND bl_datetime >= '".G5_TIME_YMD." 00:00:00' ");
+    return (int)$row['cnt'];
+}
+
+// 오늘 차단한 쇼핑 시도 횟수: 상품, 장바구니, 사이트 홈 등 차단 기록 전부 (같은 URL도 매번 셈)
+function ipp_stats_today_attempts($mb_id) {
+    global $g5;
+    $row = sql_fetch(" SELECT COUNT(*) AS cnt FROM {$g5['ipp_block_log_table']}
                        WHERE mb_id = '".sql_real_escape_string($mb_id)."'
                          AND bl_event = 'blocked'
                          AND bl_datetime >= '".G5_TIME_YMD." 00:00:00' ");

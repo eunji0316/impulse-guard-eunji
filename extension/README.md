@@ -3,7 +3,7 @@
 쇼핑 사이트에서 결제 직전에 개입하는 확장 프로그램입니다 (Manifest V3).
 서버는 그누보드의 `ipp/api/ext.php`를 사용하며, 로그인 세션 대신 회원별 API 토큰으로 인증합니다.
 
-> 3-2단계 현재 지원 사이트: 쿠팡 (상품 상세, 장바구니)
+> 3-3단계 현재 지원 사이트: 쿠팡, 지그재그 (상품 상세, 장바구니 + 사이트 전체 차단 모드)
 
 ## 파일
 
@@ -13,20 +13,27 @@
 | `background.js` | 서버 호출을 전부 처리하는 service worker. `ippApi(action, data)` |
 | `popup.html` / `popup.js` / `popup.css` | 서버 주소와 토큰을 입력하고 연결을 확인하는 팝업 |
 | `sites.js` | **사이트별 선택자 설정.** 사이트 구조가 바뀌면 이 파일만 고친다 |
-| `content.js` | 쇼핑 페이지에서 상품 정보 추출, 방문 기록, 결제 버튼 가로채기, 차단 팝업 |
+| `content.js` | 쇼핑 페이지에서 상품 정보 추출, 방문 기록, 결제 버튼 가로채기, 차단 팝업, 차단 모드 화면 |
 
 ## 쇼핑 페이지 동작 (content script)
 
 1. **방문 기록**: 상품 상세 페이지를 떠날 때 상품명, 가격, 체류 시간(초)을 `visit`으로 한 번 기록합니다. 기록 URL에서는 검색어/추적용 쿼리를 뺍니다.
 2. **결제 버튼 가로채기**: 상품 페이지의 **바로구매**, 장바구니의 **구매하기**를 누르면 원래 동작을 잠시 멈추고 서버 `check`를 호출합니다. (장바구니 담기는 가로채지 않습니다)
-3. 차단 시간이거나 충동구매(키워드, 심야, 고액)로 판단되면 **차단 팝업**을 띄웁니다. 아니면 바로 원래 동작을 진행합니다.
+3. 차단 시간이거나 충동구매(키워드, 심야, 고액)로 판단되면 **차단 팝업**을 띄웁니다. **가격을 읽지 못한 경우**에도 "가격을 읽지 못했어요"로 팝업을 띄웁니다(담아두기는 비활성). 그 밖에는 바로 원래 동작을 진행합니다.
    - **조금 더 생각하기**: 쿨다운(24시간 담아두기) 시작. 구매는 진행하지 않습니다.
    - **안 살래요**: 즉시 포기로 포인트 지급. 구매는 진행하지 않습니다.
    - **그래도 구매하기**: 원래 클릭을 그대로 다시 보냅니다.
    - 팝업을 닫거나 페이지를 떠날 때 팝업을 본 시간과 함께 `blocked`를 기록하고, 구매를 진행하면 `checkout`을 기록합니다.
-4. 토큰이 없거나 서버가 꺼져 있으면 **막지 않고** 그대로 진행합니다. (서비스 워커 콘솔이 아니라 쇼핑 페이지 콘솔에 경고가 남습니다)
+4. **차단 모드**: 설정 화면에서 차단을 시작했고(차단 시간 중) 이 사이트가 차단 목록에 켜져 있으면, 사이트의 **어느 페이지든** 들어가는 순간 전체 화면 안내로 가립니다.
+   - 남은 시간(1초마다)과 종료 시각을 보여 주고, 시간이 끝나면 저절로 사라집니다.
+   - **이 탭 닫기**, **차단 설정 보기**(서버 설정 화면), **다시 확인**(설정에서 차단을 풀었을 때 캐시를 건너뛰고 서버에 다시 물어봄)
+   - 안내를 본 시간과 함께 `blocked`를 기록합니다 (페이지를 떠나거나 안내가 사라질 때 한 번). 상품 페이지면 상품 정보도 남깁니다. 안내 뒤의 페이지는 `visit`으로 세지 않습니다.
+   - 회원 설정은 background가 **5분간 캐시**합니다(`chrome.storage.session`). 그래서 웹에서 차단을 시작/해제해도 최대 5분 늦게 반영됩니다. 결제 버튼의 `check`는 캐시 없이 매번 물어봅니다.
+   - 남은 시간은 서버가 준 남은 초(`block_remain`)로 계산하므로 PC 시계가 틀려도 맞습니다.
+5. **SPA 사이트**(지그재그): 페이지를 새로 불러오지 않고 주소만 바뀌므로 1초마다 주소를 확인해 방문 기록을 나누고 차단 여부를 다시 봅니다.
+6. 토큰이 없거나 서버가 꺼져 있으면 **막지 않고** 그대로 진행합니다. (서비스 워커 콘솔이 아니라 쇼핑 페이지 콘솔에 경고가 남습니다)
 
-확장 프로그램을 새로고침(↻)한 뒤에는 **열려 있던 쿠팡 탭도 새로고침**해야 새 content script가 들어갑니다.
+확장 프로그램을 새로고침(↻)한 뒤에는 **열려 있던 쇼핑몰 탭도 새로고침**해야 새 content script가 들어갑니다.
 
 ## 선택자 찾기 (쇼핑 사이트 구조가 바뀌었을 때)
 
@@ -74,8 +81,10 @@ document.querySelector('h1.product-title').textContent  // 읽히는 글자
 | | 이미지 | 상품 썸네일 |
 | | 구매하기 버튼 | 맨 아래 결제 진행 버튼 |
 
+지그재그(`zigzag.kr/catalog/products/...`, 장바구니 주소 확인 필요)도 같은 항목을 찾습니다. class 이름이 무작위인 경우가 많아 지금은 상품명/이미지는 `og:` 메타, 가격은 `product:price:amount` 메타가 있으면 그 값, 버튼은 글자로 찾습니다.
+
 찾은 선택자는 `sites.js`의 해당 배열 **맨 앞**에 넣고, 확장 프로그램과 쿠팡 탭을 새로고침합니다.
-버튼은 선택자가 틀려도 버튼 글자(`texts`)로 한 번 더 찾고, 상품명/이미지는 `og:title`/`og:image` 메타 태그로 대신하지만, 가격은 대체값이 없어 선택자가 맞아야 합니다.
+버튼은 선택자가 틀려도 버튼 글자(`texts`)로 한 번 더 찾고, 상품명/이미지는 `og:title`/`og:image` 메타 태그로, 가격은 `product:price:amount` 메타 태그로 대신합니다. 가격 메타가 없는 사이트(쿠팡 등)는 가격 선택자가 맞아야 합니다.
 
 ## 설치 (압축해제된 확장 프로그램 로드)
 
@@ -110,6 +119,8 @@ document.querySelector('h1.product-title').textContent  // 읽히는 글자
   ```js
   await ippApi('me')
   await ippApi('setting')
+  await ippGetSetting()        // 5분 캐시를 거친 설정 (true를 넘기면 캐시 무시)
+  await chrome.storage.session.remove('setting')   // 캐시 비우기
   await ippApi('check', { site: 'coupang', item_name: '특가 운동화', price: 89000 })
   await ippApi('log', { site: 'coupang', url: 'https://www.coupang.com/vp/products/1', item_name: '운동화', price: 89000, event: 'blocked', stay_sec: 12 })
   ```
@@ -126,8 +137,8 @@ document.querySelector('h1.product-title').textContent  // 읽히는 글자
 | action | 입력 | 응답 |
 |---|---|---|
 | `me` | - | mb_id, nick, point, features |
-| `setting` | - | is_blocking, block_until, sites, keywords, risk_alert |
+| `setting` | - | is_blocking, block_until, block_remain(남은 초), sites, keywords, risk_alert |
 | `check` | site, item_name, price | is_blocking, is_impulse, keyword, point, point2 |
-| `log` | site, url, item_name, price, event(visit/blocked/checkout), stay_sec | bl_id |
+| `log` | site, page(product/cart/''), url, item_name, price, event(visit/blocked/checkout), stay_sec | bl_id |
 | `cooldown` | item_name, price | cd_id, expire |
 | `giveup` | item_name, price | cd_id, point (안 살래요, 포인트 바로 지급) |

@@ -3,11 +3,14 @@
  * 서버 호출은 모두 여기서 한다. host_permissions가 있는 주소는 CORS 제한 없이 요청할 수 있다.
  * 팝업과 content script는 chrome.runtime.sendMessage({ type: 'ipp:api', action, data })로 요청한다.
  * content script의 차단 팝업은 { type: 'ipp:open', path }로 서버의 정해진 화면을 새 탭으로 연다.
+ * content script는 { type: 'ipp:setting', force }로 회원 설정(차단 시간, 차단 사이트)을 받는다. 5분간 캐시한다.
+ * 차단 화면의 '이 탭 닫기'는 { type: 'ipp:closeTab' }로 보낸 탭을 닫는다.
  */
 
-const IPP_DEFAULT_SERVER = 'http://localhost:8000';
-const IPP_TIMEOUT_MS     = 10000;
-const IPP_OPEN_PATHS     = ['/ipp/cooldown.php'];   // ipp:open으로 열 수 있는 서버 화면
+const IPP_DEFAULT_SERVER   = 'http://localhost:8000';
+const IPP_TIMEOUT_MS       = 10000;
+const IPP_SETTING_CACHE_MS = 5 * 60 * 1000;   // 회원 설정 캐시 시간 (5분)
+const IPP_OPEN_PATHS       = ['/ipp/cooldown.php', '/ipp/setting.php'];   // ipp:open으로 열 수 있는 서버 화면
 
 // 저장된 서버 주소와 토큰
 async function ippGetConfig() {
@@ -42,6 +45,29 @@ async function ippApi(action, data = {}) {
   }
 }
 
+// 회원 설정. 성공한 응답만 IPP_SETTING_CACHE_MS 동안 캐시하고, force면 서버에서 다시 받는다
+// - service worker는 쉬면 전역 변수가 사라지므로 chrome.storage.session(브라우저를 닫으면 지워짐)에 둔다
+// - 서버 주소나 토큰이 바뀌면 캐시를 쓰지 않는다
+// - data.block_until_ms: 차단 종료 시각(이 PC 시계 기준 ms). 서버가 준 남은 초로 계산해 PC 시계가 틀려도 남은 시간은 맞다
+async function ippGetSetting(force = false) {
+  const { server, token } = await ippGetConfig();
+  const key = server + '|' + token;
+
+  if (!force) {
+    const { setting } = await chrome.storage.session.get('setting');
+    if (setting && setting.key === key && Date.now() - setting.time < IPP_SETTING_CACHE_MS) return setting.res;
+  }
+
+  const res = await ippApi('setting');
+  if (!res.ok) {
+    await chrome.storage.session.remove('setting');
+    return res;
+  }
+  res.data.block_until_ms = res.data.is_blocking ? Date.now() + res.data.block_remain * 1000 : 0;
+  await chrome.storage.session.set({ setting: { key, time: Date.now(), res } });
+  return res;
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;   // 다른 확장 프로그램의 메시지는 무시
   if (!msg) return false;
@@ -49,6 +75,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'ipp:open' && IPP_OPEN_PATHS.includes(msg.path)) {
     ippGetConfig().then(({ server }) => chrome.tabs.create({ url: server + msg.path }));
     return false;
+  }
+  if (msg.type === 'ipp:closeTab' && sender.tab) {
+    chrome.tabs.remove(sender.tab.id);
+    return false;
+  }
+  if (msg.type === 'ipp:setting') {
+    ippGetSetting(!!msg.force).then(sendResponse);
+    return true;
   }
   if (msg.type !== 'ipp:api') return false;
 

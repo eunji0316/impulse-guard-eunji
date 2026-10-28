@@ -122,17 +122,20 @@ function ipp_keyword_match($text, $keywords) {
     return '';
 }
 
-// 차단 기록 저장. 잘못된 사이트 코드나 이벤트면 0, 성공하면 bl_id 반환
-function ipp_block_log_add($mb_id, $site, $url, $item_name, $price, $event, $stay_sec = 0) {
+// 차단 기록 저장. 잘못된 사이트 코드, 이벤트, 페이지 종류면 0, 성공하면 bl_id 반환
+// $page: product(상품 상세), cart(장바구니), ''(사이트의 그 밖의 페이지)
+function ipp_block_log_add($mb_id, $site, $url, $item_name, $price, $event, $stay_sec = 0, $page = '') {
     global $g5;
     if (!IPP_USE_SETTING) return 0;
     if (!isset(IPP_BLOCK_SITES[$site])) return 0;
     if (!in_array($event, array('visit', 'blocked', 'checkout'))) return 0;
+    if (!in_array($page, array('product', 'cart', ''))) return 0;
 
     sql_query(" INSERT INTO {$g5['ipp_block_log_table']}
                 SET mb_id        = '".sql_real_escape_string($mb_id)."',
                     bl_site      = '".sql_real_escape_string($site)."',
                     bl_url       = '".sql_real_escape_string(mb_substr($url, 0, 500, 'UTF-8'))."',
+                    bl_page      = '{$page}',
                     bl_item_name = '".sql_real_escape_string(mb_substr($item_name, 0, 255, 'UTF-8'))."',
                     bl_price     = '".max(0, (int)$price)."',
                     bl_event     = '{$event}',
