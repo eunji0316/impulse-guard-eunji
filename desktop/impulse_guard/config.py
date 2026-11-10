@@ -104,3 +104,29 @@ CLIENT_NAME = 'desktop'              # 서버에 보내는 client 값
 SERVER_TIMEOUT_SEC = 2.0             # 응답이 이 시간을 넘으면 실패로 보고 감지만 계속
 RECONNECT_SEC = 60                   # 오프라인일 때 다시 연결을 시도하는 간격
 SETTING_CACHE_SEC = 300              # 회원 설정(차단 시간, 키워드) 캐시 5분
+
+# ── 차단 팝업 (B-3 신규) ───────────────────────────────────────
+POPUP_MAX_REASONS = 2                # 팝업에 보여 줄 이유 개수
+POPUP_TOP_MARGIN = 48                # 주 모니터 위쪽에서 창까지 거리 (px)
+POPUP_WIDTH = 420                    # 창 너비 (px, 높이는 내용에 맞춤)
+POPUP_UI_POLL_MS = 100               # 다른 스레드가 보낸 화면 작업을 확인하는 간격
+COOLDOWN_PAGE = '/ipp/cooldown.php'  # '타임머신 보기'로 여는 웹 화면
+# 한글 글꼴 후보 (앞에서부터 설치된 것을 쓴다. 없으면 tkinter 기본 글꼴)
+POPUP_FONTS = ['맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans CJK KR', 'Noto Sans KR', 'NanumGothic']
+# 색 (팀 UI 시안의 차단 알림: 흰 카드, 파란 주 버튼, 회색 보조 버튼, 밑줄 텍스트 버튼)
+POPUP_COLORS = {
+    'back': '#f3f5fa',        # 창 바탕
+    'card': '#ffffff',        # 카드
+    'border': '#e5e7eb',
+    'item': '#f6f7f9',        # 상품 상자
+    'text': '#111827',
+    'sub': '#6b7280',         # 보조 글자 (원가, 링크)
+    'primary': '#3b6cf6',     # 주 버튼
+    'primary_active': '#2f5be0',
+    'primary_off': '#c7d2fe',
+    'secondary': '#eef0f3',   # 회색 보조 버튼
+    'secondary_active': '#e2e5ea',
+    'secondary_text': '#374151',
+    'danger': '#c62828',      # 이유, 할인율, 오류 안내
+    'point': '#2448c4',
+}

@@ -8,10 +8,12 @@
 - 회원 설정(차단 시간, 키워드)은 5분간 캐시한다. 남은 차단 시간은 서버가 준 남은 초로 계산한다 (PC 시계와 무관).
 - 캡처 이미지는 보내지 않는다. 상품명, 가격 등 필요한 값만 보낸다.
 - 테스트에서는 transport(실제 HTTP 호출 함수)와 clock(현재 시각 함수)을 바꿔 끼운다.
+- B-3부터 감지 작업 스레드와 팝업 버튼 스레드가 함께 부르므로 요청은 잠금(lock)으로 하나씩 보낸다.
 """
 import json
 import os
 import socket
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -78,6 +80,7 @@ class Client:
         self._last_connect = None    # 마지막 연결 시도 시각
         self._setting = None         # setting 응답
         self._setting_at = None      # setting을 받은 시각
+        self._lock = threading.RLock()   # 여러 스레드(감지 작업, 팝업 버튼)의 요청을 하나씩 보낸다
 
     @classmethod
     def from_config(cls, path=None, **kwargs):
@@ -90,6 +93,10 @@ class Client:
     # ── 요청 ───────────────────────────────────────────────
     def call(self, action, **data):
         """API 호출. 어떤 경우에도 예외를 던지지 않는다"""
+        with self._lock:
+            return self._call(action, data)
+
+    def _call(self, action, data):
         if not self.token:
             return ApiResult(False, msg=self.last_error or '토큰이 없습니다', offline=True)
         body = {'client': config.CLIENT_NAME, 'action': action, **data}
@@ -108,6 +115,8 @@ class Client:
             self.auth_failed = True
             self._went_offline(msg or '토큰이 올바르지 않습니다')
             return ApiResult(False, resp, status, msg, offline=True)
+        if self.member and not self.online:
+            self.online, self.last_error = True, ''   # 서버가 다시 응답함 (한 번 연결된 적이 있을 때만)
         ok = status == 200 and bool(resp.get('ok'))
         return ApiResult(ok, resp, status, msg)
 
@@ -171,3 +180,17 @@ class Client:
         return self.call('check', site=site, item_name=item_name, price=int(price or 0),
                          orig_price=int(orig_price or 0), discount_rate=int(discount_rate or 0),
                          is_checkout=bool(is_checkout), page=page, log=log)
+
+    # ── 팝업 결정 (B-3) ────────────────────────────────────
+    # 팝업 버튼은 오프라인이어도 한 번은 실제로 보내 본다 (check가 성공한 직후라 서버가 살아 있을 가능성이 크다)
+    def cooldown(self, item_name, price, bl_id=0):
+        """조금 더 생각하기: 쿨다운 시작 + 감지 기록에 hold. data: cd_id, expire, point2"""
+        return self.call('cooldown', item_name=item_name, price=int(price or 0), bl_id=int(bl_id or 0))
+
+    def giveup(self, item_name, price, bl_id=0):
+        """안 살래요: 즉시 포기 + 포인트 지급 + 감지 기록에 giveup. data: cd_id, point"""
+        return self.call('giveup', item_name=item_name, price=int(price or 0), bl_id=int(bl_id or 0))
+
+    def decide(self, bl_id, decision):
+        """기록만 남기는 결정: buy(그래도 구매), close(창 닫기), giveup(가격을 몰라 포인트 없이 포기)"""
+        return self.call('decide', bl_id=int(bl_id or 0), decision=decision)

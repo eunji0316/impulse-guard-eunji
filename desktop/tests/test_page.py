@@ -59,7 +59,7 @@ class FakeClient:
         self.sent = kw
         return self.result
 
-    def get_setting(self):
+    def get_setting(self, force=False):
         return {}
 
     def block_remain(self):
@@ -78,13 +78,24 @@ class TestSendAndPrint(unittest.TestCase):
 
     def test_online(self):
         sent, out = self.run_main(ApiResult(True, {'is_blocking': True, 'is_impulse': 1, 'keyword': '특가',
-                                                   'point': 496, 'point2': 992, 'bl_id': 7}), remain=3725)
+                                                   'reasons': [{'code': 'keyword', 'text': "'특가' 키워드가 들어 있어요."},
+                                                               {'code': 'night', 'text': '밤 11시~새벽 4시 사이의 심야 쇼핑이에요.'}],
+                                                   'point': 496, 'point2': 992, 'event': 'blocked', 'bl_id': 7}), remain=3725)
         self.assertEqual(sent, {'site': 'coupang', 'item_name': '맨즈실렉터 대박 남자 오버핏 볼룹 겨울 패딩', 'price': 49600,
                                 'orig_price': 119000, 'discount_rate': 58, 'is_checkout': False, 'page': 'product', 'log': True})
         self.assertIn('차단 시간입니다 (남은 시간 1시간 2분 5초)', out)
-        self.assertIn("충동구매 감지: 예 (키워드 '특가')", out)
+        self.assertIn('충동구매 감지: 예', out)
+        self.assertIn("· '특가' 키워드가 들어 있어요.", out)
+        self.assertIn('· 밤 11시~새벽 4시 사이의 심야 쇼핑이에요.', out)
         self.assertIn('지금 포기하면 496P, 24시간 참으면 992P', out)
-        self.assertIn('감지 기록 저장 (번호 7)', out)
+        self.assertIn('차단 기록 저장 (번호 7)', out)
+
+    def test_old_server_without_reasons(self):
+        """reasons가 없는 응답이면 keyword로 이유를 만든다"""
+        _, out = self.run_main(ApiResult(True, {'is_blocking': False, 'is_impulse': 1, 'keyword': '특가',
+                                                'point': 496, 'point2': 992, 'bl_id': 8}))
+        self.assertIn("· '특가' 키워드가 들어 있어요.", out)
+        self.assertIn('감지 기록 저장 (번호 8)', out)
 
     def test_offline(self):
         _, out = self.run_main(ApiResult(False, msg='응답 시간 초과', offline=True), remain=60)

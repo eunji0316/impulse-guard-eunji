@@ -69,6 +69,7 @@ Authorization: Bearer 3f9a...(64자리)
 | 401 | 토큰 없음/틀림 | `{"ok": false, "msg": "토큰이 올바르지 않습니다."}` |
 | 403 | 기능 스위치가 꺼짐 | `{"ok": false, "msg": "확장 프로그램 연결 기능이 꺼져 있습니다."}` |
 | 405 | POST가 아님 | `{"ok": false, "msg": "POST로 요청하세요."}` |
+| 409 | 팝업 결정: 이미 결정했거나 내 감지 기록이 아님 (B-3) | `{"ok": false, "msg": "이미 처리했거나 찾을 수 없는 감지 기록입니다."}` |
 
 검사 순서: `IPP_USE_CLIENT_API` → POST 여부 → JSON 본문 → `client` (extension이면 `IPP_USE_EXTENSION`) → 토큰 → action
 
@@ -78,10 +79,11 @@ Authorization: Bearer 3f9a...(64자리)
 |---|---|---|---|
 | `me` | 연결 확인, 회원과 포인트 | 없음 | - |
 | `setting` | 차단 설정 조회 | 없음 | `IPP_USE_SETTING` |
-| `check` | 상품 하나의 차단/충동구매 판단. `log: true`면 감지 기록도 저장 | `log: true`일 때 `g5_ipp_block_log` | (`log: true`면 `IPP_USE_SETTING`) |
+| `check` | 상품 하나의 차단/충동구매 판단과 이유. `log: true`면 기록도 저장 (차단 중이면 `blocked`, 아니면 `detect`) | `log: true`일 때 `g5_ipp_block_log` | (`log: true`면 `IPP_USE_SETTING`) |
 | `log` | 방문/차단/결제 진입/감지 기록 | `g5_ipp_block_log` | `IPP_USE_SETTING` |
-| `cooldown` | 24시간 담아두기 시작 | `g5_ipp_cooldown` | `IPP_USE_COOLDOWN` |
-| `giveup` | 안 살래요 (즉시 포기, 포인트 지급) | `g5_ipp_cooldown`, 포인트 | `IPP_USE_COOLDOWN` |
+| `cooldown` | 24시간 담아두기 시작. `bl_id`를 주면 그 감지 기록에 `hold` | `g5_ipp_cooldown` (+ `g5_ipp_block_log`) | `IPP_USE_COOLDOWN` |
+| `giveup` | 안 살래요 (즉시 포기, 포인트 지급). `bl_id`를 주면 그 감지 기록에 `giveup` | `g5_ipp_cooldown`, 포인트 (+ `g5_ipp_block_log`) | `IPP_USE_COOLDOWN` |
+| `decide` | 팝업 결정을 기록만 (그래도 구매, 창 닫기, 가격 모를 때 안 살래요). 쿨다운과 포인트 없음 (B-3) | `g5_ipp_block_log` | `IPP_USE_SETTING` |
 
 #### `me`: 연결 확인
 
@@ -173,33 +175,47 @@ Authorization: Bearer 3f9a...(64자리)
 | `orig_price` | | 원가(원). 음수는 0 (B-2 추가) |
 | `discount_rate` | | 할인율 %. 0~99 밖이면 0 (B-2 추가) |
 | `is_checkout` | | 결제 화면인지 (B-2 추가) |
-| `log` | | `true`면 이벤트 `detect`로 기록 1건을 저장하고 `bl_id`를 돌려줍니다. 기본 false (B-2 추가) |
+| `log` | | `true`면 기록 1건을 저장하고 `event`, `bl_id`를 돌려줍니다. 차단 중(`is_blocking: true`)이면 이벤트 `blocked`, 아니면 `detect`입니다 (B-3에서 바뀜). 기본 false (B-2 추가) |
 | `page`, `url` | | `log: true`일 때 기록에 저장. `page`는 `product`, `cart`, `""` |
 
 `orig_price`, `discount_rate`, `is_checkout`은 **지금은 저장만 하고 위험도에는 쓰지 않습니다** (C단계에서 반영).
 
 응답
 
+요청 `site: "coupang"`, `item_name: "[특가] 맨즈셀렉터 패딩"`, `price: 59600`, `orig_price: 119000`, `discount_rate: 50`, `log: true` (오전 8시 호출)
+
 ```json
 {
   "ok": true,
   "is_blocking": false,
   "is_impulse": 1,
-  "keyword": "",
-  "point": 496,
-  "point2": 992,
-  "received": { "orig_price": 119000, "discount_rate": 58, "is_checkout": true },
-  "bl_id": 82
+  "reasons": [
+    { "code": "keyword", "text": "'특가' 키워드가 들어 있어요." },
+    { "code": "big", "text": "50,000원 이상의 큰 금액이에요." }
+  ],
+  "keyword": "특가",
+  "point": 500,
+  "point2": 1000,
+  "received": { "orig_price": 119000, "discount_rate": 50, "is_checkout": false },
+  "event": "detect",
+  "bl_id": 113
 }
 ```
 
 - `is_blocking`: 지금 차단 시간이고 이 사이트가 차단 목록에 켜져 있으면 true. **`site`가 `""`이면 사이트 목록과 상관없이 차단 시간인지만 봅니다**
-- `is_impulse`: 충동구매 감지 1, 아니면 0 (숫자). 규칙: 회원 키워드가 상품명에 있거나, 심야(23시~4시 전) 또는 고액(50,000원 이상). 위 예시는 새벽 2시에 호출해서 심야로 감지된 것입니다.
+- `is_impulse`: 충동구매 감지 1, 아니면 0 (숫자). 규칙: 회원 키워드가 상품명에 있거나, 심야(23시~4시 전) 또는 고액(50,000원 이상). `reasons`가 비어 있지 않으면 1입니다.
+- `reasons`: 충동구매로 본 이유 목록 (B-3 추가). 중요한 것부터 `keyword`(회원 키워드) → `big`(고액) → `night`(심야) 순서입니다. 없으면 `[]`. `text`는 화면에 그대로 보여 줄 문구입니다 (심야: `"밤 11시~새벽 4시 사이의 심야 쇼핑이에요."`). 기준값은 `extend/ipp.extend.php`의 `IPP_DETECT_*`에서 가져옵니다.
 - `keyword`: 상품명에서 찾은 첫 키워드. 없으면 `""` (예: 상품명 `[특가] 무선 이어폰` → `"특가"`)
 - `point`: 지금 포기하면 받을 포인트, `point2`: 24시간 참으면 받을 포인트(2배). 하루 상한(1,000P)은 반영하지 않은 값입니다.
 - `received`: 서버가 정리해서 받아들인 원가, 할인율, 결제 화면 여부
-- `bl_id`: `log: true`일 때만 있습니다.
-- 위험 판단: `is_blocking`이 true이거나 `is_impulse`가 1이면 팝업을 띄웁니다 (B-3).
+- `event`, `bl_id`: `log: true`일 때만 있습니다. `event`는 저장한 이벤트(`detect` 또는 `blocked`)입니다. 차단 중이면 아래처럼 `blocked`로 저장되어 통계의 차단 횟수에 들어갑니다.
+
+  ```json
+  { "ok": true, "is_blocking": true, "is_impulse": 1, "reasons": [{ "code": "big", "text": "50,000원 이상의 큰 금액이에요." }],
+    "keyword": "", "point": 500, "point2": 1000, "received": { "orig_price": 0, "discount_rate": 0, "is_checkout": false },
+    "event": "blocked", "bl_id": 116 }
+  ```
+- 데스크톱 팝업 (B-3): `is_blocking`이면 차단 안내 창, 아니고 `is_impulse`가 1이면 충동구매 팝업을 띄웁니다. 가격을 못 읽었으면(`price: 0`) 충동구매가 아니어도 팝업을 띄웁니다. 팝업에서 고른 결정은 `bl_id`로 `cooldown`, `giveup`, `decide`에 보냅니다.
 
 #### `log`: 기록
 
@@ -236,22 +252,31 @@ Authorization: Bearer 3f9a...(64자리)
 
 - `site`, `event`, `page`가 목록에 없으면 400 `"사이트, 이벤트, 페이지 값이 올바르지 않습니다."`
 - 통계 화면은 `blocked`만 셉니다. `detect`는 통계 숫자에 들어가지 않습니다.
+- 데스크톱은 `check`의 `log: true`를 쓰므로 `log`를 따로 부르지 않습니다.
 
 #### `cooldown`: 24시간 담아두기
 
 요청
 
 ```json
-{ "client": "desktop", "action": "cooldown", "item_name": "무선 이어폰", "price": 89000 }
+{ "client": "desktop", "action": "cooldown", "item_name": "[특가] 맨즈셀렉터 패딩", "price": 59600, "bl_id": 113 }
 ```
+
+| 칸 | 필수 | 설명 |
+|---|---|---|
+| `item_name` | O | 최대 255자 |
+| `price` | O | 원, 1 이상 |
+| `bl_id` | | 데스크톱 팝업의 '조금 더 생각하기' (B-3 추가). `check`가 준 감지 기록 번호. 그 기록에 `bl_decision = hold`, `bl_cd_id = cd_id`를 적습니다 |
 
 응답
 
 ```json
-{ "ok": true, "cd_id": 18, "expire": "2026-11-12 02:57:20" }
+{ "ok": true, "cd_id": 31, "expire": "2026-11-12 08:24:41", "point2": 1000 }
 ```
 
-- `item_name`이 비었거나 `price`가 0 이하면 400 `"상품명과 가격을 보내 주세요."`
+- `item_name`이 비었거나 `price`가 0 이하면 400 `"상품명과 가격을 보내 주세요."` (이때 감지 기록은 바뀌지 않습니다)
+- `bl_id`가 이미 결정된 기록이거나, 내 `detect` 기록이 아니면 409이고 쿨다운을 만들지 않습니다. 같은 기록으로 두 번 보내도 쿨다운은 하나입니다.
+- `point2`: 24시간을 참으면 받을 포인트 (B-3 추가)
 - `expire`: 쿨다운 종료 시각 (`IPP_COOLDOWN_HOURS` 뒤). 끝나면 웹의 쿨다운 화면에서 정산되어 성공 시 2배 포인트를 줍니다.
 - 출처가 `cd_client`에 저장됩니다 (`desktop`, `extension`. 웹 화면에서 만든 것은 `web`)
 
@@ -260,18 +285,55 @@ Authorization: Bearer 3f9a...(64자리)
 요청
 
 ```json
-{ "client": "desktop", "action": "giveup", "item_name": "무선 이어폰", "price": 89000 }
+{ "client": "desktop", "action": "giveup", "item_name": "무선 이어폰", "price": 89000, "bl_id": 114 }
 ```
 
 응답
 
 ```json
-{ "ok": true, "cd_id": 19, "point": 500 }
+{ "ok": true, "cd_id": 32, "point": 500 }
 ```
 
 - 쿨다운을 만들고 바로 포기(`gaveup`) 처리해 포인트를 지급합니다 (`ipp_give_point()`를 거침).
 - `point`: 실제 지급된 포인트. 하루 상한을 넘으면 줄어들거나 0입니다.
+- `bl_id`(선택, B-3 추가): 그 감지 기록에 `bl_decision = giveup`, `bl_cd_id = cd_id`를 적습니다. 결정을 포인트보다 먼저 적으므로 같은 기록으로 두 번 보내면 두 번째는 409이고 **포인트가 다시 나가지 않습니다**.
 - 입력 오류는 `cooldown`과 같습니다.
+
+#### `decide`: 팝업 결정 기록 (B-3 추가)
+
+쿨다운과 포인트 없이 감지 기록에 결정만 남깁니다.
+
+요청
+
+```json
+{ "client": "desktop", "action": "decide", "bl_id": 115, "decision": "buy" }
+```
+
+| 칸 | 필수 | 값 |
+|---|---|---|
+| `bl_id` | O | `check`가 준 감지 기록 번호 |
+| `decision` | O | `buy`(그래도 구매할래요), `close`(창의 X로 닫음), `giveup`(가격을 못 읽어 포인트 없이 안 살래요) |
+
+응답
+
+```json
+{ "ok": true, "bl_id": 115, "decision": "buy" }
+```
+
+- `bl_id`가 없으면 400 `"bl_id를 보내 주세요."`, `decision`이 목록 밖이면(`hold` 포함) 400 `"decision 값이 올바르지 않습니다. (buy, close, giveup)"`
+- 이미 결정된 기록, 다른 회원의 기록, `blocked` 기록, 없는 기록은 409입니다.
+
+**감지 기록의 결정 칸** (`ipp/sql/007_popup_decision.sql`)
+
+| `bl_decision` | 버튼 | 함께 생기는 것 |
+|---|---|---|
+| `''` | 아직 결정 없음 (팝업을 띄우지 않음) | - |
+| `hold` | 조금 더 생각하기 (`cooldown`) | 쿨다운 `waiting`, `bl_cd_id` |
+| `giveup` | 안 살래요 (`giveup`, 가격을 모르면 `decide`) | 쿨다운 `gaveup`과 포인트, `bl_cd_id` (가격을 모르면 없음) |
+| `buy` | 그래도 구매할래요 (`decide`) | 없음 |
+| `close` | 창의 X (`decide`) | 없음 (포인트 없음) |
+
+`bl_decision_datetime`에 결정한 시각이 저장됩니다.
 
 ### 2-4. 호출 예시
 
@@ -296,6 +358,11 @@ if r.ok:
     print(r.data['is_impulse'], r.data['bl_id'])
 elif r.offline:
     print('서버 연결 안 됨:', r.msg)
+
+# 팝업 버튼 (B-3): 기록 하나에 셋 중 하나만 성공한다 (두 번째부터 409). 모두 bl_id를 함께 보낸다
+client.cooldown('무선 이어폰', 89000, r.data['bl_id'])   # 조금 더 생각하기
+client.giveup('무선 이어폰', 89000, r.data['bl_id'])     # 안 살래요
+client.decide(r.data['bl_id'], 'buy')                    # 그래도 구매할래요 (창 X는 'close')
 ```
 
 ## 3. 웹 화면용 API (로그인 세션)

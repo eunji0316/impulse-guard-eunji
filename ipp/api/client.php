@@ -118,7 +118,9 @@ if ($action === 'setting') {
 }
 
 // 상품 하나에 대한 차단/충동구매 판단
-// log가 true면 detect 기록 1건도 저장한다 (데스크톱이 요청 한 번으로 판단과 기록을 함께 하도록)
+// log가 true면 기록 1건도 저장한다 (데스크톱이 요청 한 번으로 판단과 기록을 함께 하도록)
+//   차단 시간이면 blocked(통계의 차단 횟수에 들어감), 아니면 detect. 저장한 이벤트는 event로 돌려준다
+// reasons: 충동구매로 본 이유 [{code, text}]. 비어 있지 않으면 is_impulse가 1이다
 // orig_price, discount_rate, is_checkout은 지금은 저장만 한다. 위험도 반영은 C단계
 if ($action === 'check') {
     $site      = ipp_api_site($body, $client);
@@ -126,10 +128,13 @@ if ($action === 'check') {
     $price     = max(0, ipp_api_int($body, 'price'));
     $info      = ipp_api_detect_info($body);
 
-    $st     = ipp_setting_get($mb_id);
-    $result = array(
-        'is_blocking' => ipp_is_blocking($mb_id, $site),   // site가 ''면 사이트 목록과 상관없이 차단 시간인지만 본다
-        'is_impulse'  => ipp_detect_impulse($price, 'shopping', G5_TIME_YMDHIS, $item_name, $mb_id),   // 차단 사이트는 모두 쇼핑몰
+    $st       = ipp_setting_get($mb_id);
+    $reasons  = ipp_impulse_reasons($price, 'shopping', G5_TIME_YMDHIS, $item_name, $mb_id);   // 차단 사이트는 모두 쇼핑몰
+    $blocking = ipp_is_blocking($mb_id, $site);   // site가 ''면 사이트 목록과 상관없이 차단 시간인지만 본다
+    $result   = array(
+        'is_blocking' => $blocking,
+        'is_impulse'  => $reasons ? 1 : 0,
+        'reasons'     => $reasons,
         'keyword'     => IPP_USE_SETTING ? ipp_keyword_match($item_name, $st['st_keywords']) : '',
         'point'       => ipp_calc_point($price),
         'point2'      => ipp_calc_point($price, IPP_COOLDOWN_MULTIPLIER),
@@ -137,9 +142,10 @@ if ($action === 'check') {
     );
     if (ipp_api_bool($body, 'log')) {
         if (!IPP_USE_SETTING) ipp_api_json(403, false, array('msg' => '차단 설정 기능이 꺼져 있습니다.'));
-        $info['client'] = $client;
+        $info['client']  = $client;
+        $result['event'] = $blocking ? 'blocked' : 'detect';
         $result['bl_id'] = ipp_block_log_add($mb_id, $site, ipp_api_str($body, 'url'), $item_name, $price,
-            'detect', 0, ipp_api_str($body, 'page'), $info);
+            $result['event'], 0, ipp_api_str($body, 'page'), $info);
         if (!$result['bl_id']) ipp_api_json(400, false, array('msg' => '페이지 값이 올바르지 않습니다.'));
     }
     ipp_api_json(200, true, $result);
@@ -158,28 +164,60 @@ if ($action === 'log') {
     ipp_api_json(200, true, array('bl_id' => $bl_id));
 }
 
+// 팝업 결정을 감지 기록에 먼저 적는다 (bl_id가 있을 때만). 이미 결정했거나 내 detect 기록이 아니면 409
+// 포인트를 주기 전에 적어야 같은 기록으로 두 번 요청해도 포인트가 한 번만 나간다
+function ipp_api_claim_decision($mb_id, $bl_id, $decision) {
+    if ($bl_id <= 0) return;
+    if (!ipp_block_log_decide($mb_id, $bl_id, $decision)) {
+        ipp_api_json(409, false, array('msg' => '이미 처리했거나 찾을 수 없는 감지 기록입니다.'));
+    }
+}
+
 // 쿨다운 시작 (사고 싶은 상품을 타임머신에 보관)
+// bl_id(선택): 데스크톱 팝업의 '조금 더 생각하기'. 그 감지 기록에 hold와 쿨다운 번호를 적는다
 if ($action === 'cooldown') {
     if (!IPP_USE_COOLDOWN) ipp_api_json(403, false, array('msg' => '쿨다운 기능이 꺼져 있습니다.'));
     $item_name = ipp_api_str($body, 'item_name');
     $price     = ipp_api_int($body, 'price');
+    $bl_id     = ipp_api_int($body, 'bl_id');
     if ($item_name === '' || $price <= 0) ipp_api_json(400, false, array('msg' => '상품명과 가격을 보내 주세요.'));
+    ipp_api_claim_decision($mb_id, $bl_id, 'hold');
 
     $cd_id = ipp_cooldown_create($mb_id, mb_substr($item_name, 0, 255, 'UTF-8'), $price, $client);
+    if ($bl_id > 0) ipp_block_log_set_cooldown($bl_id, $cd_id);
     $cd    = ipp_cooldown_get($cd_id);
-    ipp_api_json(200, true, array('cd_id' => $cd_id, 'expire' => $cd['cd_expire_datetime']));
+    ipp_api_json(200, true, array('cd_id' => $cd_id, 'expire' => $cd['cd_expire_datetime'],
+        'point2' => ipp_calc_point($price, IPP_COOLDOWN_MULTIPLIER)));
 }
 
 // 안 살래요 (즉시 포기, 포인트 바로 지급. 웹의 ipp/api/cooldown.php giveup과 같은 처리)
+// bl_id(선택): 데스크톱 팝업의 '안 살래요'. 그 감지 기록에 giveup과 쿨다운 번호를 적는다
 if ($action === 'giveup') {
     if (!IPP_USE_COOLDOWN) ipp_api_json(403, false, array('msg' => '쿨다운 기능이 꺼져 있습니다.'));
     $item_name = ipp_api_str($body, 'item_name');
     $price     = ipp_api_int($body, 'price');
+    $bl_id     = ipp_api_int($body, 'bl_id');
     if ($item_name === '' || $price <= 0) ipp_api_json(400, false, array('msg' => '상품명과 가격을 보내 주세요.'));
+    ipp_api_claim_decision($mb_id, $bl_id, 'giveup');
 
     $cd_id = ipp_cooldown_create($mb_id, mb_substr($item_name, 0, 255, 'UTF-8'), $price, $client);
+    if ($bl_id > 0) ipp_block_log_set_cooldown($bl_id, $cd_id);
     $point = ipp_cooldown_finish(ipp_cooldown_get($cd_id), 'gaveup');
     ipp_api_json(200, true, array('cd_id' => $cd_id, 'point' => $point));
+}
+
+// 팝업 결정을 기록만 한다 (쿨다운, 포인트 없음)
+// buy(그래도 구매할래요), close(창의 X로 닫음), giveup(가격을 몰라 포인트 없이 '안 살래요')
+if ($action === 'decide') {
+    if (!IPP_USE_SETTING) ipp_api_json(403, false, array('msg' => '차단 설정 기능이 꺼져 있습니다.'));
+    $bl_id    = ipp_api_int($body, 'bl_id');
+    $decision = ipp_api_str($body, 'decision');
+    if ($bl_id <= 0) ipp_api_json(400, false, array('msg' => 'bl_id를 보내 주세요.'));
+    if (!in_array($decision, array('buy', 'close', 'giveup'), true)) {
+        ipp_api_json(400, false, array('msg' => 'decision 값이 올바르지 않습니다. (buy, close, giveup)'));
+    }
+    ipp_api_claim_decision($mb_id, $bl_id, $decision);
+    ipp_api_json(200, true, array('bl_id' => $bl_id, 'decision' => $decision));
 }
 
 ipp_api_json(400, false, array('msg' => '알 수 없는 요청입니다.'));

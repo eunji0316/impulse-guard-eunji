@@ -72,6 +72,7 @@ function ipp_stats_by_site($mb_id, $days = 7) {
                         ORDER BY cnt DESC, bl_site ");
     while ($row = sql_fetch_array($res)) {
         $name = isset(IPP_BLOCK_SITES[$row['bl_site']]) ? IPP_BLOCK_SITES[$row['bl_site']]['name'] : $row['bl_site'];
+        if ($row['bl_site'] === '') $name = '사이트 모름';   // 데스크톱이 OCR로 사이트를 알아내지 못한 차단 (B-3)
         $list[] = array('site' => $row['bl_site'], 'name' => $name, 'cnt' => (int)$row['cnt']);
     }
     return $list;
