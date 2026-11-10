@@ -1,5 +1,20 @@
 # impulse-guard 진행 상황
 
+## 2026-11-11 · 데스크톱 화면 OCR 쇼핑몰 감지: 원본 실행 환경 (desktop/)
+
+팀원이 만든 화면 OCR 쇼핑몰 감지 코드(`desktop/original/shopping_detector.py`)를 프로젝트에 넣고 실행 환경을 갖췄다. 원본은 수정하지 않는다.
+
+### 완료
+
+- **실행 환경**: `desktop/requirements.txt`(easyocr, mss, numpy, keyboard), 가상환경 `desktop/.venv`(Python 3.13, torch CPU). `.venv/`는 `.gitignore`에 추가
+- **README** (`desktop/README.md`): 팀원 작품이라는 것, 원본 동작 방식, 실행 방법, 문제 해결(관리자 권한, 주 모니터만 캡처), 구조화 계획(캡처, OCR, 판별, 서버 통신 모듈 분리)
+- **원본 실행 확인 (사용자 확인)**: 쿠팡 화면에서 F4 → 쇼핑몰로 판정
+
+### 남은 이슈
+
+- [ ] **B단계 개선: OCR 가격 오인식**: 쿠팡 판정 때 감지된 가격 중 `444366원`처럼 OCR이 잘못 읽은 값이 있었다. 지금은 가격 패턴이 1개만 있어도 쇼핑몰로 판정하므로, 잘못 읽은 값도 판정에 그대로 쓰인다. 쉼표 위치 검사, 현실적인 금액 범위, OCR 신뢰도(`readtext` 결과의 confidence) 기준 등으로 거르는 방법을 검토한다.
+- [ ] **구조화**: README의 계획대로 capture / ocr / detector / server_client / main 모듈로 나눈다. 판정 결과는 원본과 같아야 한다.
+
 ## 2026-10-28 · 3단계-3: 지그재그 추가와 차단 모드 (feature/extension)
 
 지그재그를 지원 사이트에 추가했다. 회원이 정한 차단 시간에 차단 사이트에 들어가면 사이트 전체를 전체 화면 안내로 가린다.
