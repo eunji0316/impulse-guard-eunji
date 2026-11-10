@@ -2,3 +2,10 @@
 .vscode/
 .idea/
 *.log
+
+# Python 가상환경
+.venv/
+__pycache__/
+
+# 데스크톱 프로그램의 서버 주소와 토큰 (예시: desktop/local_config.example.json)
+desktop/local_config.json

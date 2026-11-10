@@ -1,0 +1,5 @@
+# 데스크톱 쇼핑몰 감지 프로그램 의존성
+easyocr    # 화면 텍스트 인식(OCR), torch를 함께 설치함
+mss        # 화면 캡처
+numpy      # 캡처 이미지 배열 처리
+keyboard   # F4 단축키 감지
