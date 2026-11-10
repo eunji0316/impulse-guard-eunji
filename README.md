@@ -94,7 +94,7 @@ php -S localhost:8001
 
 ### 6. 커스텀 테이블 추가
 
-`ipp/sql/` 폴더의 SQL 파일을 번호 순서대로 실행합니다.
+`ipp/sql/` 폴더의 SQL 파일을 번호 순서대로 실행합니다. 팀 공용 DB를 복사해 왔다면 복사 이후에 추가된 번호만 실행합니다 (예: B-2의 `006_client_source.sql`).
 
 ## 데스크톱 감지 프로그램 실행 (Windows)
 
@@ -104,13 +104,34 @@ php -S localhost:8001
 cd desktop
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt   # 최초 1회 (PyTorch 포함이라 오래 걸림)
-.\.venv\Scripts\python.exe original\shopping_detector.py         # 팀원 원본 실행
+.\.venv\Scripts\python.exe -m impulse_guard.main                 # 감지 프로그램 (서버 연동)
+.\.venv\Scripts\python.exe original\shopping_detector.py         # 팀원 원본 (참고용)
 ```
 
 - 첫 실행 때 OCR 모델을 내려받느라 몇 분 걸립니다.
 - 쇼핑몰 화면을 주 모니터에 띄우고 `F4`를 누르면 분석 결과가 콘솔에 나옵니다. 종료는 `Ctrl + C`
 - `F4`에 반응이 없으면 터미널을 관리자 권한으로 실행합니다.
-- 서버와 연결하는 기능은 B단계에서 추가합니다. 연결에는 웹의 `/ipp/setting.php`에서 발급한 API 토큰을 씁니다 ([docs/API.md](docs/API.md)).
+
+### 서버와 연결하기 (API 토큰)
+
+데스크톱 프로그램은 로그인 대신 회원별 **API 토큰**으로 서버에 연결합니다. 토큰이 없거나 서버가 꺼져 있으면 오프라인 모드로 감지만 합니다.
+
+1. 서버를 켭니다: `php -S localhost:8001`
+2. 브라우저에서 `http://localhost:8001`에 로그인하고 `http://localhost:8001/ipp/setting.php`를 엽니다.
+3. **외부 프로그램 연결 (데스크톱 감지 프로그램)** 에서 **발급**을 누릅니다. 서버 주소와 토큰이 **한 번만** 보이니 바로 복사합니다. 잃어버리면 **재발급**합니다 (이전 토큰은 무효가 됩니다).
+4. `desktop/local_config.example.json`을 복사해 `desktop/local_config.json`을 만들고 값을 넣습니다. 이 파일은 Git에 올라가지 않습니다.
+
+   ```json
+   {
+     "server": "http://localhost:8001",
+     "token": "발급받은 64자리 토큰",
+     "timeout_sec": 2
+   }
+   ```
+
+5. `.\.venv\Scripts\python.exe -m impulse_guard.main`을 실행하면 `[서버] 연결됨: ... / 닉네임(아이디) / 포인트`가 나옵니다.
+
+API 명세는 [docs/API.md](docs/API.md)를 참고하세요.
 
 ## 작업 규칙
 

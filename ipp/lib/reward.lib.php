@@ -53,11 +53,14 @@ function ipp_reward_exchange_locked($mb_id, $rw_id, $order_no) {
     $point = (int)$rw['rw_point'];
     if (get_point_sum($mb_id) < $point) return array('ok' => false, 'msg' => '포인트가 부족합니다.');
 
-    // 재고 차감 (-1은 무제한이라 그대로 둔다)
-    sql_query(" UPDATE {$g5['ipp_reward_table']}
-                SET rw_stock = IF(rw_stock = -1, -1, rw_stock - 1)
-                WHERE rw_id = '{$rw['rw_id']}' AND rw_use = 1 AND rw_stock <> 0 ");
-    if (ipp_affected_rows() < 1) return array('ok' => false, 'msg' => '품절된 상품입니다.');
+    // 재고 차감. -1은 무제한이라 UPDATE하지 않는다
+    // (예전에는 무제한도 rw_stock = -1로 다시 썼는데, 값이 그대로면 바뀐 행 수가 0이라 품절로 처리되는 버그가 있었다)
+    if ((int)$rw['rw_stock'] !== -1) {
+        sql_query(" UPDATE {$g5['ipp_reward_table']}
+                    SET rw_stock = rw_stock - 1
+                    WHERE rw_id = '{$rw['rw_id']}' AND rw_use = 1 AND rw_stock > 0 ");
+        if (ipp_affected_rows() < 1) return array('ok' => false, 'msg' => '품절된 상품입니다.');
+    }
 
     sql_query(" INSERT INTO {$g5['ipp_coupon_table']}
                 SET mb_id       = '{$mb}',

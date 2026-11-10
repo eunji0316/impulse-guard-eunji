@@ -24,7 +24,7 @@ if ($action === 'exchange') {
 
     $result = ipp_reward_exchange($mb_id, $rw_id, $order_no);
     if (!$result['ok']) ipp_json(false, array('msg' => $result['msg']));
-    ipp_json(true, array('cp_id' => $result['cp_id'], 'point' => get_point_sum($mb_id)));
+    ipp_json(true, array('cp_id' => $result['cp_id'], 'point' => (int)get_point_sum($mb_id)));
 }
 
 // 쿠폰 사용 완료 표시

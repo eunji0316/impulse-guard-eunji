@@ -10,7 +10,8 @@ define('IPP_USE_SIMULATION', false);  // 미래가치 시뮬레이션
 define('IPP_USE_GIFTICON',   true);   // 기프티콘 리워드 교환
 define('IPP_USE_SETTING',    true);   // 회원별 차단 설정, 차단 기록
 define('IPP_USE_STATS',      true);   // 통계 화면
-define('IPP_USE_EXTENSION',  true);   // 크롬 확장 프로그램 연결 (토큰 API)
+define('IPP_USE_CLIENT_API', true);   // 외부 프로그램 API (토큰 인증, ipp/api/client.php). 데스크톱, 팀원 프로젝트, 확장 프로그램 공용
+define('IPP_USE_EXTENSION',  false);  // 그중 크롬 확장 프로그램의 호출 (보류 중이라 꺼 둠, extension/README.md)
 
 /* ===== 포인트 기준 ===== */
 define('IPP_POINT_RATE',          0.01);  // 절약 금액의 1%
@@ -47,8 +48,9 @@ define('IPP_KEYWORD_MAX',           20);  // 키워드 최대 개수
 define('IPP_KEYWORD_LEN',           20);  // 키워드 하나의 최대 글자 수
 define('IPP_BLOCK_CUSTOM_MAX_DAYS', 30);  // 직접 설정할 수 있는 최대 차단 기간(일)
 
-/* ===== 확장 프로그램 기준 ===== */
+/* ===== 외부 프로그램 API 기준 ===== */
 define('IPP_TOKEN_TOUCH_SEC', 60);  // 토큰 마지막 사용 시각은 이 간격(초)마다 한 번만 갱신
+define('IPP_CLIENTS', array('extension', 'desktop'));  // API를 부를 수 있는 프로그램 (요청의 client 값)
 
 /* ===== 경로 ===== */
 define('IPP_PATH', G5_PATH.'/ipp');

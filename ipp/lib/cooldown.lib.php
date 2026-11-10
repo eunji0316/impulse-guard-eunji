@@ -2,14 +2,17 @@
 if (!defined('_GNUBOARD_')) exit;
 
 // 쿨다운 시작 (상태: waiting)
-function ipp_cooldown_create($mb_id, $item_name, $amount) {
+// $client: 어디서 만들었나. web(웹 화면), extension(크롬 확장 프로그램), desktop(데스크톱 감지 프로그램)
+function ipp_cooldown_create($mb_id, $item_name, $amount, $client = 'web') {
     global $g5;
     $now    = G5_TIME_YMDHIS;
     $expire = date('Y-m-d H:i:s', G5_SERVER_TIME + (int)(IPP_COOLDOWN_HOURS * 3600));
+    if (!in_array($client, array('web', 'extension', 'desktop'))) $client = 'web';
 
     sql_query(" INSERT INTO {$g5['ipp_cooldown_table']}
                 SET mb_id              = '".sql_real_escape_string($mb_id)."',
                     cd_source          = 'manual',
+                    cd_client          = '{$client}',
                     cd_item_name       = '".sql_real_escape_string($item_name)."',
                     cd_amount          = '".(int)$amount."',
                     cd_status          = 'waiting',

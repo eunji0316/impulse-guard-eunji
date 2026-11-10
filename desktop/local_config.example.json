@@ -1,0 +1,5 @@
+{
+  "server": "http://localhost:8001",
+  "token": "",
+  "timeout_sec": 2
+}
