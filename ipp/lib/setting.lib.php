@@ -157,6 +157,33 @@ function ipp_block_log_add($mb_id, $site, $url, $item_name, $price, $event, $sta
     return sql_insert_id();
 }
 
+// 팝업 결정 (B-3, 007_popup_decision.sql)
+// hold(담아두기), giveup(안 살래요), buy(그래도 구매), close(창 닫기)
+define('IPP_DECISIONS', array('hold', 'giveup', 'buy', 'close'));
+
+// 감지 기록 하나에 팝업 결정을 적는다. 본인의 detect 기록이고 아직 결정이 없을 때만 적고 true
+// 쿨다운/포인트보다 먼저 부른다. 같은 기록으로 두 번 요청해도 한 번만 성공하므로 포인트가 두 번 나가지 않는다
+function ipp_block_log_decide($mb_id, $bl_id, $decision) {
+    global $g5;
+    if (!IPP_USE_SETTING || !in_array($decision, IPP_DECISIONS, true) || (int)$bl_id <= 0) return false;
+    sql_query(" UPDATE {$g5['ipp_block_log_table']}
+                SET bl_decision          = '{$decision}',
+                    bl_decision_datetime = '".G5_TIME_YMDHIS."'
+                WHERE bl_id = '".(int)$bl_id."'
+                  AND mb_id = '".sql_real_escape_string($mb_id)."'
+                  AND bl_event = 'detect'
+                  AND bl_decision = '' ");
+    return ipp_affected_rows() > 0;
+}
+
+// 결정으로 만든 쿨다운 번호를 감지 기록에 잇는다
+function ipp_block_log_set_cooldown($bl_id, $cd_id) {
+    global $g5;
+    sql_query(" UPDATE {$g5['ipp_block_log_table']}
+                SET bl_cd_id = '".(int)$cd_id."'
+                WHERE bl_id = '".(int)$bl_id."' ");
+}
+
 // 외부 프로그램(데스크톱 등) 토큰 발급/재발급. DB에는 해시만 저장하고 평문 토큰을 반환한다 (화면에 한 번만 보여 줌)
 function ipp_setting_regen_token($mb_id) {
     global $g5;

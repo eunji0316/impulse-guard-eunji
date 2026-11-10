@@ -192,6 +192,62 @@ class TestSettingCache(unittest.TestCase):
         self.assertEqual(c.site_hints(), {'coupang': ['쿠팡']})
 
 
+class TestPopupCalls(unittest.TestCase):
+    """B-3 팝업 결정 요청"""
+
+    def test_bodies(self):
+        fake = FakeServer(cooldown=(200, {'ok': True}), giveup=(200, {'ok': True}), decide=(200, {'ok': True}))
+        c, _ = make(fake)
+        c.connect()
+        c.cooldown('패딩', 49600, 7)
+        c.giveup('패딩', '49600', None)
+        c.decide(7, 'buy')
+        self.assertEqual(fake.calls[1:], [
+            {'client': 'desktop', 'action': 'cooldown', 'item_name': '패딩', 'price': 49600, 'bl_id': 7},
+            {'client': 'desktop', 'action': 'giveup', 'item_name': '패딩', 'price': 49600, 'bl_id': 0},
+            {'client': 'desktop', 'action': 'decide', 'bl_id': 7, 'decision': 'buy'}])
+
+    def test_back_online_after_timeout(self):
+        """버튼 요청 하나가 시간 초과여도, 서버가 다시 응답하면 바로 온라인으로 돌아온다"""
+        fake = FakeServer(decide=TimeoutError())
+        c, _ = make(fake)
+        c.connect()
+        self.assertTrue(c.decide(7, 'buy').offline)
+        self.assertFalse(c.online)
+        fake.responses['decide'] = (200, {'ok': True})
+        self.assertTrue(c.decide(7, 'buy').ok)
+        self.assertTrue(c.online)
+
+    def test_never_connected_stays_offline(self):
+        """한 번도 연결된 적 없으면 응답이 와도 온라인으로 바꾸지 않는다 (회원 정보가 없음)"""
+        fake = FakeServer(decide=(200, {'ok': True}))
+        c, _ = make(fake)
+        c.decide(7, 'buy')
+        self.assertFalse(c.online)
+
+    def test_requests_one_at_a_time(self):
+        """여러 스레드가 동시에 불러도 요청은 하나씩 나간다"""
+        active, peak = [0], [0]
+        lock = threading.Lock()
+
+        def slow(url, body, token, timeout):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            time.sleep(0.05)
+            with lock:
+                active[0] -= 1
+            return 200, {'ok': True}
+
+        c = Client('http://localhost:8001', 'a' * 64, 2.0, transport=slow)
+        threads = [threading.Thread(target=c.decide, args=(i, 'buy')) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(peak[0], 1)
+
+
 class _SlowHandler(http.server.BaseHTTPRequestHandler):
     delay = 3.0
 
