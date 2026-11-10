@@ -8,7 +8,8 @@
 >   - 사이트마다 상품명/가격/버튼 선택자를 사람이 직접 찾아 맞춰야 하고, 사이트 디자인이 바뀌면 깨진다 (쿠팡 Tailwind 클래스, 지그재그 무작위 class 이름).
 >   - 규칙과 선택자뿐이라 AI 요소가 없다.
 > - **대신**: 팀원의 화면 OCR 감지 코드를 중심으로 데스크톱 감지 프로그램(`desktop/`)을 만든다.
-> - **서버 API는 유지**: `ipp/api/ext.php`의 토큰 인증 API는 데스크톱 프로그램이 재사용한다. 그래서 `IPP_USE_EXTENSION` 스위치도 켜 둔다. 명세는 `docs/API.md` 참고.
+> - **서버 API는 유지**: 토큰 인증 API는 B-2에서 공용 API `ipp/api/client.php`로 옮겼고 데스크톱 프로그램이 쓴다. `ext.php`는 예전 주소로 남아 있다 (client가 없으면 extension으로 처리).
+> - **스위치**: B-2에서 `IPP_USE_CLIENT_API`(공용 API)와 `IPP_USE_EXTENSION`(확장 프로그램 호출만)을 나눴다. `IPP_USE_EXTENSION`은 **false**라 확장 프로그램 요청은 403이다. 다시 쓰려면 true로 바꾼다. 명세는 `docs/API.md` 참고.
 > - 아래 내용은 보류 시점(3-3단계, 버전 0.3.1)의 설명입니다.
 
 쇼핑 사이트에서 결제 직전에 개입하는 확장 프로그램입니다 (Manifest V3).

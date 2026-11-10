@@ -8,7 +8,9 @@
 - desktop/: 데스크톱 감지 프로그램 (Python, 가상환경 desktop/.venv)
 - desktop/original/: 팀원이 만든 원본 OCR 감지 코드. 절대 수정하지 않는다. 고칠 내용은 desktop/의 새 모듈에 작성한다.
 - ai/: 충동구매 위험도 모델 (데이터, 특성, 학습)
-- extension/: 크롬 확장 프로그램. 보류 중이며 코드는 지우지 않는다. 서버의 토큰 API(ipp/api/ext.php)는 데스크톱이 재사용하므로 유지한다.
+- extension/: 크롬 확장 프로그램. 보류 중이며 코드는 지우지 않는다 (IPP_USE_EXTENSION = false).
+- 외부 프로그램 API는 ipp/api/client.php (토큰 인증, 데스크톱 공용). ext.php는 예전 주소라 남겨 둔다.
+- desktop/local_config.json(서버 주소, 토큰)은 Git에 올리지 않는다.
 
 ## 규칙
 - 그누보드 기본 파일은 수정하지 않는다.

@@ -74,3 +74,33 @@ ROLE_WEIGHTS = {
 # 취소선 판정: 상자 가운데 높이 범위에서 글자색 픽셀이 너비의 이 비율 이상 이어지면 취소선
 STRIKE_ROW_RANGE = (0.30, 0.75)
 STRIKE_MIN_RUN = 0.70
+
+# ── 페이지 정보 (B-2 신규): 사이트, 상품명, 결제 화면 ──────────
+# 사이트 코드는 서버의 IPP_BLOCK_SITES와 같다. 화면 글자에 이 단어가 있으면 그 사이트로 본다 (대소문자 무시)
+# 서버 setting 응답의 사이트 이름도 실행 중에 더해진다
+SITE_HINTS = {
+    'coupang': ['coupang', '쿠팡'],
+    'musinsa': ['musinsa', '무신사'],
+    'zigzag':  ['zigzag', '지그재그'],
+    'naver':   ['네이버쇼핑', 'naver'],
+    'gmarket': ['gmarket', 'g마켓'],
+    '11st':    ['11번가', '11st'],
+}
+# 상품명: 할인가 위쪽에서 찾는다
+ITEM_NAME_SEARCH_UP = 10      # 할인가 상자 높이의 몇 배 위까지 볼지
+ITEM_NAME_ALIGN_X = 4         # 할인가와 왼쪽 끝이 이 배수(상자 높이 기준) 안에 있어야 같은 영역
+ITEM_NAME_MIN_LETTERS = 4     # 글자(한글/영문) 수가 이보다 적으면 상품명이 아님
+ITEM_NAME_EXCLUDE = ['리뷰', '상품평', '만족', '별점', '평점', '도착', '배송', '쿠폰', '판매자']
+# 결제 화면: 이 단어 중 서로 다른 것이 CHECKOUT_MIN_WORDS개 이상 보이면 결제 화면
+CHECKOUT_WORDS = ['결제하기', '주문서', '배송지', '주문자', '받는 분', '받는분', '결제수단', '결제 수단',
+                  '주문 정보', '주문정보', '최종 결제', '총 결제', '결제금액', '결제 금액', '구매조건', '약관 동의']
+CHECKOUT_MIN_WORDS = 2
+
+# ── 서버 연결 (B-2 신규) ───────────────────────────────────────
+LOCAL_CONFIG = 'local_config.json'   # desktop 폴더 기준. 서버 주소와 토큰 (Git에 올리지 않음)
+DEFAULT_SERVER = 'http://localhost:8001'
+API_PATH = '/ipp/api/client.php'
+CLIENT_NAME = 'desktop'              # 서버에 보내는 client 값
+SERVER_TIMEOUT_SEC = 2.0             # 응답이 이 시간을 넘으면 실패로 보고 감지만 계속
+RECONNECT_SEC = 60                   # 오프라인일 때 다시 연결을 시도하는 간격
+SETTING_CACHE_SEC = 300              # 회원 설정(차단 시간, 키워드) 캐시 5분

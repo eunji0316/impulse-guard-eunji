@@ -124,27 +124,40 @@ function ipp_keyword_match($text, $keywords) {
 
 // 차단 기록 저장. 잘못된 사이트 코드, 이벤트, 페이지 종류면 0, 성공하면 bl_id 반환
 // $page: product(상품 상세), cart(장바구니), ''(사이트의 그 밖의 페이지)
-function ipp_block_log_add($mb_id, $site, $url, $item_name, $price, $event, $stay_sec = 0, $page = '') {
+// $extra: client(extension/desktop, 기본 extension), orig_price(원가), discount_rate(할인율 %), is_checkout(결제 화면 여부)
+// 사이트를 모르는 데스크톱 감지는 $site = ''로 저장할 수 있다 (OCR로 사이트를 알아내지 못한 경우)
+function ipp_block_log_add($mb_id, $site, $url, $item_name, $price, $event, $stay_sec = 0, $page = '', $extra = array()) {
     global $g5;
     if (!IPP_USE_SETTING) return 0;
-    if (!isset(IPP_BLOCK_SITES[$site])) return 0;
-    if (!in_array($event, array('visit', 'blocked', 'checkout'))) return 0;
+
+    $client = isset($extra['client']) ? $extra['client'] : 'extension';
+    if (!in_array($client, IPP_CLIENTS)) return 0;
+    if (!isset(IPP_BLOCK_SITES[$site]) && !($site === '' && $client === 'desktop')) return 0;
+    if (!in_array($event, array('visit', 'blocked', 'checkout', 'detect'))) return 0;
     if (!in_array($page, array('product', 'cart', ''))) return 0;
 
+    $orig_price    = isset($extra['orig_price'])    ? max(0, (int)$extra['orig_price']) : 0;
+    $discount_rate = isset($extra['discount_rate']) ? max(0, min(99, (int)$extra['discount_rate'])) : 0;
+    $is_checkout   = !empty($extra['is_checkout']) ? 1 : 0;
+
     sql_query(" INSERT INTO {$g5['ipp_block_log_table']}
-                SET mb_id        = '".sql_real_escape_string($mb_id)."',
-                    bl_site      = '".sql_real_escape_string($site)."',
-                    bl_url       = '".sql_real_escape_string(mb_substr($url, 0, 500, 'UTF-8'))."',
-                    bl_page      = '{$page}',
-                    bl_item_name = '".sql_real_escape_string(mb_substr($item_name, 0, 255, 'UTF-8'))."',
-                    bl_price     = '".max(0, (int)$price)."',
-                    bl_event     = '{$event}',
-                    bl_stay_sec  = '".max(0, (int)$stay_sec)."',
-                    bl_datetime  = '".G5_TIME_YMDHIS."' ");
+                SET mb_id            = '".sql_real_escape_string($mb_id)."',
+                    bl_client        = '{$client}',
+                    bl_site          = '".sql_real_escape_string($site)."',
+                    bl_url           = '".sql_real_escape_string(mb_substr($url, 0, 500, 'UTF-8'))."',
+                    bl_page          = '{$page}',
+                    bl_item_name     = '".sql_real_escape_string(mb_substr($item_name, 0, 255, 'UTF-8'))."',
+                    bl_price         = '".max(0, (int)$price)."',
+                    bl_orig_price    = '{$orig_price}',
+                    bl_discount_rate = '{$discount_rate}',
+                    bl_is_checkout   = '{$is_checkout}',
+                    bl_event         = '{$event}',
+                    bl_stay_sec      = '".max(0, (int)$stay_sec)."',
+                    bl_datetime      = '".G5_TIME_YMDHIS."' ");
     return sql_insert_id();
 }
 
-// 확장 프로그램 토큰 발급/재발급. DB에는 해시만 저장하고 평문 토큰을 반환한다 (화면에 한 번만 보여 줌)
+// 외부 프로그램(데스크톱 등) 토큰 발급/재발급. DB에는 해시만 저장하고 평문 토큰을 반환한다 (화면에 한 번만 보여 줌)
 function ipp_setting_regen_token($mb_id) {
     global $g5;
     ipp_setting_get($mb_id);
@@ -159,7 +172,7 @@ function ipp_setting_regen_token($mb_id) {
     return $token;
 }
 
-// 확장 프로그램 연결 해제 (토큰 삭제)
+// 외부 프로그램 연결 해제 (토큰 삭제)
 function ipp_setting_revoke_token($mb_id) {
     global $g5;
     sql_query(" UPDATE {$g5['ipp_setting_table']}

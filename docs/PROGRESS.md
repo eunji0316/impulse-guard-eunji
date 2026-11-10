@@ -1,5 +1,84 @@
 # impulse-guard 진행 상황
 
+## 2026-11-11 · B-2: 데스크톱과 서버 연동 (feature/desktop-server)
+
+데스크톱 감지 프로그램이 서버(8001)와 통신한다. 감지 결과로 서버에 위험도를 묻고 감지 기록을 남긴다. 결과는 콘솔에만 출력한다 (팝업은 B-3).
+
+### 완료
+
+- **브랜치**: B-1(`feature/desktop-modules`)을 dev에 병합하고 push했다(`b129f30`). dev에서 `feature/desktop-server`를 만들었다.
+- **기능 스위치 분리** (`extend/ipp.extend.php`)
+  - `IPP_USE_CLIENT_API`(신규, true): 토큰 인증 API 전체
+  - `IPP_USE_EXTENSION`(뜻 변경, **false**): 그중 크롬 확장 프로그램의 호출만
+  - `IPP_CLIENTS`: API를 부를 수 있는 프로그램 목록 (`extension`, `desktop`)
+  - 웹 설정 화면의 토큰 발급은 `IPP_USE_CLIENT_API`로 판단한다. 문구도 "외부 프로그램 연결 (데스크톱 감지 프로그램)"으로 바꿨다.
+- **공용 API** `ipp/api/client.php`
+  - `ext.php`의 코드를 옮겼다. `ext.php`는 상수 `IPP_API_DEFAULT_CLIENT = 'extension'`만 정하고 include하는 예전 주소로 남겼다.
+  - 상수로 둔 이유: 그누보드가 요청 변수를 전역으로 풀어도 값이 바뀌지 않게 하려는 것이다.
+  - 요청에 `client`가 필요하다. 없거나 틀리면 400, `extension`인데 스위치가 꺼져 있으면 403이다.
+  - 검사 순서가 바뀌었다: JSON 본문과 client를 토큰보다 먼저 본다.
+  - `me`에 `client`, `server_time`을 추가했다.
+  - `check` 확장: `orig_price`, `discount_rate`(0~99), `is_checkout`을 받아 정리한 값을 `received`로 돌려준다. `log: true`면 `detect` 기록을 저장하고 `bl_id`를 돌려준다. 위험도에는 아직 쓰지 않는다 (C단계).
+  - 사이트를 모를 때: `client: desktop`이면 `site: ""`를 받는다. 이때 `is_blocking`은 사이트 목록과 상관없이 차단 시간인지만 본다.
+  - `log` 이벤트에 `detect`를 추가했다. `log`, `cooldown`, `giveup`은 client를 출처로 저장한다.
+- **DB** (`ipp/sql/006_client_source.sql`)
+  - `g5_ipp_block_log`: `bl_client`(기본 extension), `bl_orig_price`, `bl_discount_rate`, `bl_is_checkout`
+  - `g5_ipp_cooldown`: `cd_client`(web/extension/desktop, 006 이전은 `''`)
+  - `cd_source`(manual/detect: 어떻게 시작됐나)와 `cd_client`(어디서 왔나)는 다른 정보라 칸을 나눴다.
+  - 실행 결과: 두 번 실행해도 오류가 없었다. 기존 기록 52건은 `extension`, 쿨다운 6건은 `''`로 채워졌다.
+- **lib**: `ipp_block_log_add()`에 `$extra`(client, 원가, 할인율, 결제 화면), `ipp_cooldown_create()`에 `$client`(기본 web)를 추가했다. 기존 호출은 그대로 동작한다.
+- **데스크톱**
+  - `desktop/local_config.json`(Git 제외)에서 서버 주소와 토큰을 읽는다. 예시는 `local_config.example.json`
+  - `server_client.Client`
+    - 시작할 때 `me`로 회원을 확인한다. 실패하면 오프라인 모드로 감지만 한다.
+    - 오프라인이면 F4를 누를 때 60초 간격으로 다시 연결해 본다. 401이면 다시 시도하지 않는다.
+    - 모든 호출은 2초 timeout이고, 실패해도 예외 없이 `ApiResult(offline=True)`를 돌려준다.
+    - `setting`은 5분 캐시. 남은 차단 시간은 서버가 준 남은 초로 계산한다.
+    - HTTP는 표준 라이브러리 `urllib`를 써서 의존성을 늘리지 않았다.
+  - `detector/page.py`: 사이트(로고 글자, 서버 사이트 이름), 상품명(할인가 위쪽의 가장 큰 글자 줄), 결제 화면(결제 단어 2개 이상)
+  - `main.py`: 쇼핑 화면이면 `check(log=true)`를 부르고 차단 여부, 남은 시간, 충동구매 감지, 키워드, 받을 포인트, 기록 번호를 출력한다.
+- **문서**
+  - `docs/API.md`: `client.php` 기준으로 다시 썼다. 성공 응답 예시는 모두 실제 호출 결과다.
+  - `README.md`, `desktop/README.md`: 토큰 발급 방법과 데스크톱 연결 방법을 추가했다.
+  - `CLAUDE.md`, `extension/README.md`: 스위치와 API 주소 변경을 반영했다.
+- **테스트**
+  - 서버 HTTP (임시 회원, 테스트 후 삭제) 35개 중 34개 통과
+    - 확인한 것: 상태 코드, client 구분, `ext.php` 기본 extension, `site: ""`, check의 `log`와 값 범위, 차단 중 사이트별 판단, detect/cooldown/giveup의 출처 저장, 웹 쿨다운 기본값 `web`, 스위치 조합 4가지, 확장 프로그램 예전 형식 요청
+    - 실패 1개는 테스트 기대값이 틀린 것이다. 새벽 2시에 테스트해서 심야 규칙으로 `is_impulse: 1`이 맞게 나왔다.
+  - 웹 화면용 API (임시 회원 로그인): cooldown, setting, mock_bank, reward 실제 응답 확인
+  - 사용자 확인: 본인 토큰을 `local_config.json`에 넣고 실제 쿠팡 화면에서 F4
+    - `[서버] 위험도 판단`이 나왔다.
+    - 할인가 26,900원, 심야라 충동구매 감지 "예", 포인트 269P/538P, 감지 기록 번호 90으로 저장됐다.
+- **DB 점검 (개인 DB `impulse_eunji_db`)**
+  - 처음에는 `002_gifticon.sql`이 적용되지 않아 리워드/쿠폰 테이블이 없었다. 사용자가 HeidiSQL로 실행했다.
+  - 그 뒤 `ipp/sql/` 001~006이 정의하는 테이블 7개, 컬럼 78개, 인덱스 11개가 모두 있는지 확인했다. 004의 `MODIFY`(토큰 NULL 허용)도 적용돼 있다. 빠진 항목은 없다.
+- **버그 수정: 무제한 리워드를 교환할 수 없음** (`ipp/lib/reward.lib.php`)
+  - 원인: 재고 `-1`(무제한)도 `rw_stock = -1`로 같은 값을 다시 UPDATE했다. MariaDB는 값이 바뀌지 않은 행을 바뀐 행 수에 세지 않아서 0이 되고, 품절로 처리됐다. 시연 리워드 5개 중 4개가 무제한이라 교환이 거의 안 되는 상태였다.
+  - 수정: 무제한이면 재고 UPDATE를 건너뛰고, 유한 재고만 `rw_stock > 0`일 때 1 줄인다.
+  - 확인: 무제한 교환 성공(재고 -1 그대로), 유한 재고 1 → 0 → 품절, 중복 주문번호/포인트 부족/이미 사용한 쿠폰 거절
+  - `reward.php`의 `exchange` 응답 `point`가 문자열(`"600"`)이어서 정수로 바꿨다 (화면은 이 값을 쓰지 않는다).
+  - 데스크톱 unittest 40개 통과 (B-1 16개 + B-2 24개)
+    - 가짜 서버: 온라인/오프라인, 401, 60초 뒤 다시 연결, 설정 캐시 5분, 남은 시간 계산, 잘못된 JSON
+    - 늦게 응답하는 로컬 서버로 2초 timeout, 아무도 없는 포트
+    - 이미지 4장의 사이트와 상품명, 콘솔 출력
+  - 실제 연결 (임시 회원 토큰, OCR 캐시 4장)
+    - 쇼핑 3장이 `check` → `detect` 기록으로 저장됐다 (사이트, 상품명, 할인가, 원가, 할인율 DB 확인). 서버 응답은 0.02~0.04초였다.
+    - 차단 중이면 "남은 시간 59분 58초"가 나온다.
+    - 서버가 꺼져 있으면 2.0초 뒤 오프라인 모드가 된다. 그다음 F4는 기다리지 않고 바로 "감지만 했습니다"가 나온다.
+    - 틀린 토큰이면 재발급 안내가 나온다.
+
+### 남은 이슈
+
+- [x] **사용자 확인**: 실제 쿠팡 화면에서 F4 → 위험도 판단과 감지 기록(90번) 확인
+- [x] **리워드 테이블 없음**: 002를 실행했고, API.md 리워드 예시를 실제 호출로 맞췄다.
+- [ ] **충동구매 이유 (B-3)**: 서버 `check`가 감지 이유(키워드/심야/고액)를 돌려주지 않아 콘솔에 "예"만 나온다. 키워드일 때만 이유가 보인다. B-3에서 처리한다.
+- [ ] **F4 처리 시간**: 서버 호출은 hotkey 처리 안에서 동기로 한다. 서버가 응답하지 않으면 그 F4는 최대 2초(+OCR 시간) 늦어진다. 팝업(B-3)에서는 백그라운드 스레드로 옮길지 검토한다.
+- [ ] **Windows 연결 거부**: 서버가 꺼져 있을 때 Windows는 닫힌 포트에도 다시 시도해서, 메시지가 "연결 실패"가 아니라 "응답 시간 초과"로 나온다 (2초 안에 오프라인 처리는 됨).
+- [ ] **상품명 OCR 오류**: 상품명은 OCR 글자 그대로라 키워드 검사가 빗나갈 수 있다 (예: '특가'를 '특기'로 읽으면 못 찾음).
+- [ ] **감지 기록 중복 (B-4)**: 같은 화면에서 F4를 여러 번 누르면 `detect`가 매번 쌓인다. B-4에서 같은 상품을 묶는다.
+- [ ] **통계**: `detect`와 `bl_client`는 아직 통계 화면에 나오지 않는다 (FEATURES 3번 "감지 출처 구분").
+- [ ] **`client` 필수**: `client.php`는 client가 없으면 400이다. 팀원 프로젝트를 붙일 때 `IPP_CLIENTS`에 값을 추가해야 한다 (`docs/API.md` 4번).
+
 ## 2026-11-11 · B-1: 팀원 코드 모듈 분리와 가격 분석 (feature/desktop-modules)
 
 원본(`desktop/original/shopping_detector.py`)은 그대로 두고, 같은 동작을 기능별 모듈로 나눈 `desktop/impulse_guard/` 패키지를 만들었다. 가격 분석 모듈을 새로 추가했다. 자동 감지, 서버 연동, 팝업은 범위 밖이다.
