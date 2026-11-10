@@ -19,7 +19,7 @@
 ### 완료
 
 - **개인 저장소 분리**: 팀 공용 저장소에서 개인 저장소 `eunji0316/impulse-guard-eunji`로 분리
-- **DB 복사**: 개인용 DB `impulse_eunji_db`로 복사, 로컬 서버는 `localhost:8001`
+- **DB 복사**: HeidiSQL로 `youngcart_db`를 개인용 DB `impulse_eunji_db`로 복사하고 `data/dbconfig.php`의 `G5_MYSQL_DB`를 바꿨다 (방법은 README 3단계). 로컬 서버는 `localhost:8001`
 - **팀원 코드 실행 확인**
   - 원본 `desktop/original/shopping_detector.py`를 넣었다. 이 파일은 수정하지 않는다.
   - 실행 환경: `desktop/requirements.txt`(easyocr, mss, numpy, keyboard), 가상환경 `desktop/.venv`(Python 3.13, torch CPU). `.venv/`는 `.gitignore`에 추가
@@ -36,14 +36,20 @@
 - 원본은 가격 패턴이 1개만 있어도 쇼핑몰로 판정하므로, 잘못 읽은 값도 판정에 그대로 쓰인다. 서버에 가격을 보내면 고액 판단과 포인트 계산도 틀어진다.
 - B-1 가격 분석 모듈에서 거른다: 쉼표 위치 검사, 현실적인 금액 범위, OCR 신뢰도(`readtext`의 confidence), 원가와 할인율로 할인가 검산 등
 
-### 다음 단계: B-1
+### 다음 단계
+
+**B-1**
 
 - **팀원 코드 모듈 분리**: 원본은 그대로 두고 capture / ocr / detector / server_client / main으로 나눈다. 같은 화면에서 판정 결과가 원본과 같아야 한다.
 - **가격 분석 모듈**: OCR 결과에서 가격 후보를 찾고 원가, 할인가, 기타(배송비, 적립금)를 구분한다. 글자 크기, 취소선, 색, 주변 단어, 위치를 단서로 쓰고, 할인율로 검산해 위 사례 같은 OCR 오류를 걸러 낸다.
 
+**B-2**
+
+- [ ] **기능 스위치 분리**: 지금은 `IPP_USE_EXTENSION` 하나가 `ext.php` 전체를 켜고 끈다. 끄면 데스크톱도 403이 되므로 A-5에서는 켜 둔 채로 두었다. 확장 프로그램용 스위치와 외부 클라이언트(데스크톱, 팀원 프로젝트) API용 스위치로 나눈다. FEATURES.md 5번의 "기능 스위치로 끄고"는 이 분리 뒤에 한다.
+- [ ] **API.md 성공 응답 검증**: A-5에서는 오류 응답(401, 405, 로그인 필요)만 8001 서버에서 확인했다. 성공 응답 예시는 코드를 보고 쓴 것이므로, 데스크톱 프로그램으로 실제 호출하면서 맞춰 본다.
+
 ### 남은 이슈
 
-- [ ] **FEATURES.md의 "기능 스위치로 끄고"**: `IPP_USE_EXTENSION`을 끄면 `ext.php` 전체가 403이 되어 데스크톱도 쓸 수 없다. 확장 프로그램만 끌 스위치가 필요하면 토큰 API 스위치와 나눠야 한다.
 - [ ] **`check`의 `site`**: 지금은 `IPP_BLOCK_SITES` 코드만 받는다. OCR로 찾은 쇼핑몰이 목록에 없을 때의 처리가 필요하다 (`docs/API.md` 4번)
 
 ## 2026-10-28 · 3단계-3: 지그재그 추가와 차단 모드 (feature/extension)

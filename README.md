@@ -50,12 +50,32 @@ MariaDB에서 개인 프로젝트용 DB를 만듭니다.
 CREATE DATABASE impulse_eunji_db DEFAULT CHARACTER SET utf8mb4;
 ```
 
-팀 공용 DB(`youngcart_db`)의 데이터를 그대로 가져오려면 덤프해서 넣습니다. 이 경우 5단계 설치는 건너뛰고 `data/dbconfig.php`의 DB 이름만 `impulse_eunji_db`로 맞춥니다.
+#### 팀 공용 DB(`youngcart_db`)를 복사해서 쓰는 경우 (HeidiSQL)
 
-```
-mysqldump -u root -p youngcart_db > youngcart_db.sql
-mysql -u root -p impulse_eunji_db < youngcart_db.sql
-```
+이미 설치된 팀 공용 DB의 데이터를 그대로 가져오는 방법입니다. 이 경우 5단계 그누보드 설치는 건너뜁니다.
+
+1. 위의 `CREATE DATABASE impulse_eunji_db ...`로 빈 DB를 만듭니다.
+2. HeidiSQL에서 `youngcart_db`를 오른쪽 클릭 → **데이터베이스를 SQL로 내보내기**
+3. 내보내기 설정
+   - 데이터베이스: **생성 해제** (`impulse_eunji_db`를 이미 만들었으므로)
+   - 테이블: **생성** 체크
+   - 데이터: **INSERT**
+   - 출력: **데이터베이스** → `impulse_eunji_db`
+4. 내보내기를 실행하면 테이블과 데이터가 `impulse_eunji_db`로 복사됩니다.
+5. `data/dbconfig.php`의 DB 이름을 바꿉니다.
+
+   ```php
+   define('G5_MYSQL_DB', 'impulse_eunji_db');
+   ```
+
+> **참고: 명령어로 복사하기 (mysqldump)**
+>
+> HeidiSQL이 없으면 명령어로도 복사할 수 있습니다. 위 1, 5단계는 같습니다.
+>
+> ```
+> mysqldump -u root -p youngcart_db > youngcart_db.sql
+> mysql -u root -p impulse_eunji_db < youngcart_db.sql
+> ```
 
 ### 4. 서버 실행
 
