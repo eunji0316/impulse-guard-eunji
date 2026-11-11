@@ -6,9 +6,10 @@
 """
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import cache
-from impulse_guard import main, winocr
+from impulse_guard import config, main, ocr, winocr
 
 
 def word(text, x, w=40, y=0, h=20):
@@ -37,6 +38,40 @@ class TestSplitLine(unittest.TestCase):
         """쉼표 자리가 조금 벌어져도 숫자 두 조각은 한 상자"""
         groups = winocr.split_line([word('224', 0, 30), word('910원', 65, 40)])
         self.assertEqual(len(groups), 1)
+
+
+class TestEngineChoice(unittest.TestCase):
+    """main.ocr_engine: 'win'이면 Windows OCR, 쓸 수 없으면 EasyOCR로 바꾼다"""
+    def setUp(self):
+        self.saved = main._engine
+        main._engine = None
+
+    def tearDown(self):
+        main._engine = self.saved
+
+    def test_windows_ocr_when_available(self):
+        with mock.patch.object(config, 'OCR_ENGINE', 'win'), mock.patch.object(winocr, 'available', return_value=True):
+            eng = main.ocr_engine()
+        self.assertEqual((eng.name, eng.read, eng.reread, eng.note), ('Windows OCR', winocr.read, winocr.read_struck, ''))
+
+    def test_fallback_to_easyocr(self):
+        with mock.patch.object(config, 'OCR_ENGINE', 'win'), mock.patch.object(winocr, 'available', return_value=False):
+            eng = main.ocr_engine()
+        self.assertEqual((eng.name, eng.read), ('EasyOCR', ocr.read))
+        self.assertIn('EasyOCR', eng.note)
+
+    def test_easy_setting(self):
+        with mock.patch.object(config, 'OCR_ENGINE', 'easy'), mock.patch.object(winocr, 'available') as avail:
+            eng = main.ocr_engine()
+        self.assertEqual((eng.name, eng.note), ('EasyOCR', ''))
+        avail.assert_not_called()
+
+    def test_engine_name_in_timing(self):
+        main._engine = main.OcrEngine('가짜', lambda img: [], lambda img, box: [])
+        t = main.timing.Timing('auto')
+        with main.timing.active(t):
+            main.analyze_image(None)
+        self.assertEqual(t.info['엔진'], '가짜')
 
 
 @unittest.skipUnless(winocr.available(), '한국어 Windows OCR이 없음')

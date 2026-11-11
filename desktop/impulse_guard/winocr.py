@@ -1,4 +1,4 @@
-"""Windows 내장 OCR (Windows.Media.Ocr) 래퍼 (B-5 비교용)
+"""Windows 내장 OCR (Windows.Media.Ocr) 래퍼 (B-5, 기본 엔진. config.OCR_ENGINE / main.ocr_engine)
 
 ocr.read와 같은 형식(OcrBox 목록)으로 돌려줘서 판정/가격 분석을 그대로 쓸 수 있다.
 - Windows 10 이상 + 한국어 OCR 언어팩이 필요하다 (설정 → 언어에 한국어). 패키지: winrt-Windows.Media.Ocr 등

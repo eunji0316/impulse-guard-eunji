@@ -7,7 +7,10 @@
 # ── OCR (원본과 같음) ──────────────────────────────────────────
 OCR_LANGS = ['ko', 'en']   # 한국어 + 영어
 OCR_GPU = False            # CPU 모드
-# Windows 내장 OCR (B-5 비교용, winocr.py). 작은 글자에서 쉼표를 빠뜨려서 키워서 읽는다
+# OCR 엔진 (B-5): 'win' = Windows 내장 OCR (winocr.py, 화면 한 장 약 1초), 'easy' = EasyOCR (원본과 같음, 약 10초)
+# 'win'이어도 한국어 Windows OCR을 쓸 수 없으면(언어팩/패키지 없음) EasyOCR로 바꿔 쓴다 (main.ocr_engine)
+OCR_ENGINE = 'win'
+# Windows 내장 OCR (winocr.py). 작은 글자에서 쉼표를 빠뜨려서 키워서 읽는다
 WINOCR_LANG = 'ko'
 WINOCR_SCALE = 2.0         # 키우는 배율 (1배: '224910원', 2배: '224,910원')
 WINOCR_SPLIT_GAP = 1.5     # 한 줄 안에서 단어 사이가 줄 높이의 이 배수보다 멀면 다른 상자

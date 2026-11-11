@@ -6,7 +6,8 @@ tests/images/의 캡처를 실제 자동 감지와 같은 분석(main.analyze_bo
 정답(EXPECTED)과 다르면 줄 끝에 NG를 붙인다.
 
 실행 (desktop 폴더에서):
-    .venv\\Scripts\\python.exe tests\\bench_ocr.py                       # EasyOCR, 전체, 이미지마다 1번
+    .venv\\Scripts\\python.exe tests\\bench_ocr.py                       # 앱이 쓰는 엔진(main.ocr_engine), 전체, 1번
+    .venv\\Scripts\\python.exe tests\\bench_ocr.py --engine easy         # EasyOCR (B-5 전 기준선)
     .venv\\Scripts\\python.exe tests\\bench_ocr.py checkout --repeat 3   # 이름에 checkout이 들어간 것만 3번 (중앙값)
     .venv\\Scripts\\python.exe tests\\bench_ocr.py --engine win          # Windows 내장 OCR (winocr.py)
     .venv\\Scripts\\python.exe tests\\bench_ocr.py --engine win --win-scale 1.5
@@ -38,6 +39,9 @@ EXPECTED = {
 
 def engine_fns(name, win_scale):
     """(읽기 함수, 다시 읽기 함수)"""
+    if name == 'app':
+        eng = app_main.ocr_engine()
+        return eng.read, eng.reread
     if name == 'win':
         from impulse_guard import winocr
         return (lambda img: winocr.read(img, win_scale)), winocr.read_struck
@@ -56,7 +60,7 @@ def main(argv):
     p.add_argument('names', nargs='*', help='이미지 이름 일부 (없으면 전체)')
     p.add_argument('--repeat', type=int, default=1)
     p.add_argument('--scale', type=float, default=1.0, help='OCR 전에 이미지를 이 배율로 줄인다')
-    p.add_argument('--engine', choices=['easy', 'win'], default='easy')
+    p.add_argument('--engine', choices=['app', 'easy', 'win'], default='app')
     p.add_argument('--win-scale', type=float, default=None, help='Windows OCR이 키워서 읽는 배율 (기본 config)')
     args = p.parse_args(argv)
     if hasattr(sys.stdout, 'reconfigure'):
@@ -64,7 +68,12 @@ def main(argv):
 
     read, reread = engine_fns(args.engine, args.win_scale)
     t0 = timing.now()
-    if args.engine == 'win':
+    if args.engine == 'app':
+        eng = app_main.ocr_engine()
+        if eng.name == 'EasyOCR':
+            ocr.get_reader()
+        print(f'엔진 {eng.name} (앱과 같음){" - " + eng.note if eng.note else ""}, 축소 {args.scale}')
+    elif args.engine == 'win':
         from impulse_guard import config, winocr
         winocr.get_engine()
         print(f'엔진 Windows OCR (키우는 배율 {args.win_scale or config.WINOCR_SCALE}), 축소 {args.scale}')

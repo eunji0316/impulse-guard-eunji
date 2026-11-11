@@ -3,3 +3,11 @@ easyocr    # 화면 텍스트 인식(OCR), torch를 함께 설치함
 mss        # 화면 캡처
 numpy      # 캡처 이미지 배열 처리
 keyboard   # F4 단축키 감지
+# Windows 내장 OCR (B-5, 기본 엔진). 한국어 OCR 언어팩이 필요하다. 없으면 EasyOCR로 바꿔 쓴다
+winrt-runtime; sys_platform == "win32"
+winrt-Windows.Media.Ocr; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging; sys_platform == "win32"
+winrt-Windows.Storage.Streams; sys_platform == "win32"
+winrt-Windows.Foundation; sys_platform == "win32"
+winrt-Windows.Foundation.Collections; sys_platform == "win32"
+winrt-Windows.Globalization; sys_platform == "win32"

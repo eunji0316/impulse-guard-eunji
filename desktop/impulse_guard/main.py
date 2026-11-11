@@ -76,9 +76,41 @@ def analyze_boxes(boxes, img=None, reread=None, site_hints=None):
     return Analysis(shop, prices, info, boxes, st)
 
 
+@dataclass
+class OcrEngine:
+    name: str                 # 로그와 콘솔용 ('Windows OCR', 'EasyOCR')
+    read: object              # 이미지 → OcrBox 목록
+    reread: object            # 취소선 구간 다시 읽기
+    note: str = ''            # 원하는 엔진을 못 쓴 이유 (EasyOCR로 바꿨을 때)
+
+
+_engine = None
+
+
+def ocr_engine():
+    """쓸 OCR 엔진 (처음 한 번 정한다). config.OCR_ENGINE이 'win'이고 한국어 Windows OCR이 있으면 Windows OCR,
+    아니면 EasyOCR (원본과 같은 설정)"""
+    global _engine
+    if _engine is None:
+        note = ''
+        if config.OCR_ENGINE == 'win':
+            from . import winocr
+            if winocr.available():
+                _engine = OcrEngine('Windows OCR', winocr.read, winocr.read_struck)
+            else:
+                note = 'Windows OCR(한국어)을 쓸 수 없어 EasyOCR을 씁니다'
+        if _engine is None:
+            _engine = OcrEngine('EasyOCR', ocr.read, ocr.read_struck, note)
+    return _engine
+
+
 def analyze_image(img, site_hints=None):
     """이미지 한 장을 OCR부터 분석한다"""
-    return analyze_boxes(ocr.read(img), img, reread=ocr.read_struck, site_hints=site_hints)
+    eng = ocr_engine()
+    t = timing.current()
+    if t is not None:
+        t.info['엔진'] = eng.name
+    return analyze_boxes(eng.read(img), img, reread=eng.reread, site_hints=site_hints)
 
 
 def timed_analysis(fn, *args):
@@ -463,15 +495,20 @@ def main():
     from . import popup
     from .auto_detect import AutoDetector
     capture.set_console_title(config.CONSOLE_TITLE)
-    print("화면 분석을 위한 OCR 모델을 로딩 중입니다. 최초 실행 시 약간의 시간이 걸립니다")
-    ocr.get_reader()
+    eng = ocr_engine()
+    if eng.note:
+        print(f"[OCR] {eng.note}")
+    if eng.name == 'EasyOCR':
+        print("화면 분석을 위한 OCR 모델을 로딩 중입니다. 최초 실행 시 약간의 시간이 걸립니다")
+        ocr.get_reader()
     conf = load_config()
     auto = conf['auto']
     client = Client.from_config()
     client.connect()
     client.get_setting()
     log = DetectLog(save_ocr_text=auto['save_ocr_text'])
-    log.info(f"프로그램 시작. 자동 감지 설정: {conf['auto_source']} → {auto}", console=False)
+    log.info(f"프로그램 시작. OCR 엔진: {eng.name}{' (' + eng.note + ')' if eng.note else ''}."
+             f" 자동 감지 설정: {conf['auto_source']} → {auto}", console=False)
     ui = popup.UiHost()                   # main 스레드에서 만든다
     app = App(client, ui, settings=auto, log=log)
     detector = (AutoDetector(app, auto['interval_sec'], log=log, exclude_programs=auto['exclude_programs'])
@@ -479,6 +516,7 @@ def main():
     print("\n" + "=" * 50)
     print("쇼핑몰 감지 프로그램이 실행되었습니다!")
     print_connection(client)
+    print(f"OCR 엔진: {eng.name}")
     if detector:
         print(f"자동 감지: 켜짐 ({auto['interval_sec']}초 간격, 화면이 바뀌고 멈추면 분석)."
               f" 같은 주문은 {auto['same_order_minutes']}분 안에 다시 알리지 않습니다.")
