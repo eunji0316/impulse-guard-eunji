@@ -145,6 +145,7 @@ class TestSamples(unittest.TestCase):
 class TestOcrFixes(unittest.TestCase):
     def test_misread_label(self):
         self.assertEqual(stage.normalize('좀 결제금억'), '총결제금액')
+        self.assertEqual(stage.normalize('총 결제금역'), '총결제금액')      # Windows OCR 1.5배
         self.assertEqual(stage.checkout_score('좀 결제금억')[1], [('총결제금액', 3)])
         b = cs.boxes([('좀 결제금억', 40, 300, 80), ('9,900원', 400, 300, 80)])
         self.assertEqual(price.find_checkout_total(b), (9900, '총결제금액'))
