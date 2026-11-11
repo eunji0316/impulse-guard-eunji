@@ -184,6 +184,10 @@ FRAME_HASH_SIZE = 16
 FRAME_SAME_DISTANCE = 6          # 직전 분석 화면과 이 이하로 다르면 같은 화면 (OCR 생략)
 FRAME_SETTLE_DISTANCE = 12       # 바로 앞 회차와 이 이하로 다르면 화면이 멈춘 것으로 본다 (광고 배너 등 작은 움직임 허용)
 AUTO_SETTLE_SEC = 1.0            # 화면이 바뀌는 중이면 interval_sec를 다 기다리지 않고 이 시간 뒤 다시 확인
+# 창 제목으로 빨리 확인 (B-5). 제목은 기다리는 시간만 바꾸고 판정에는 쓰지 않는다 (판정은 OCR). 제목 글자는 로그에 남기지 않는다
+CHECKOUT_TITLE_WORDS = ['결제', '주문서', '주문하기', '구매하기', 'checkout', 'payment']   # 대소문자 무시
+AUTO_TITLE_POLL_SEC = 0.2        # 기다리는 동안 맨 앞 창 제목을 확인하는 간격. 결제 페이지 제목으로 바뀌면 바로 확인
+AUTO_FAST_SETTLE_SEC = 0.5       # 제목이 결제 페이지일 때 멈춤 확인 간격 (AUTO_SETTLE_SEC 대신)
 ORDER_SAME_DISTANCE = 20         # 결제 금액을 못 읽었을 때, 이 이하로 다르면 같은 주문
 CHECKOUT_NAME_MINUTES = 30       # 결제 화면의 상품명: 같은 쇼핑몰에서 이 시간 안에 본 마지막 상품 이름을 쓴다
 CONSOLE_TITLE = 'impulse-guard 감지 프로그램'   # 콘솔 창 제목. 맨 앞 창이 이 제목이면 자동 감지를 건너뛴다

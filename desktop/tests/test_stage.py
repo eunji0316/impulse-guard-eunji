@@ -142,6 +142,14 @@ class TestSamples(unittest.TestCase):
         self.assertIn('| 금액 라벨 총결제금액', line)
 
 
+class TestCheckoutTitle(unittest.TestCase):
+    def test_titles(self):
+        for title in ('주문/결제 | 지그재그', '주문서 작성 - 무신사', '쿠팡! | 주문하기', 'Checkout - Shop', 'PAYMENT'):
+            self.assertTrue(stage.is_checkout_title(title), title)
+        for title in ('상품 상세 - 지그재그', '장바구니', '', None, '네이버 뉴스'):
+            self.assertFalse(stage.is_checkout_title(title), title)
+
+
 class TestOcrFixes(unittest.TestCase):
     def test_misread_label(self):
         self.assertEqual(stage.normalize('좀 결제금억'), '총결제금액')

@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 import cache
 import checkout_samples as cs
@@ -115,6 +116,54 @@ class TestAutoDetectorTick(unittest.TestCase):
         self.assertIsNotNone(t.detected_at)
         self.assertIsNone(d.change_at)                   # 분석한 뒤에는 지운다
         self.assertIsNone(timing.current())              # 측정은 분석하는 동안만
+
+    # ── 제목으로 빨리 확인 (B-5) ──
+    def test_checkout_title_shortens_settle(self):
+        d, _ = self.detector(Script(H1, H2, title='주문/결제 | 지그재그'))
+        self.assertEqual(d.tick(), 'changing')
+        self.assertTrue(d.checkout_title)
+        self.assertEqual(d.next_wait(), config.AUTO_FAST_SETTLE_SEC)
+
+    def test_other_title_keeps_settle(self):
+        d, _ = self.detector(Script(H1, H2, title='뉴스 - 오늘의 소식'))
+        self.assertEqual(d.tick(), 'changing')
+        self.assertEqual(d.next_wait(), config.AUTO_SETTLE_SEC)
+
+    def test_title_info_in_timing_without_title_text(self):
+        d, app = self.detector(Script(H1, H1, title='주문서 작성 - 무신사'))
+        self.assertEqual([d.tick(), d.tick()], ['changing', 'analyzed'])
+        t = app.timings[-1]
+        self.assertEqual(t.info['제목'], '결제 페이지')
+        self.assertNotIn('무신사', t.line())
+
+    def wait_detector(self, titles):
+        titles = list(titles)
+        d, _ = self.detector(Script(H1))
+        d.title_fn = lambda: titles.pop(0) if len(titles) > 1 else titles[0]
+        d.last_title = '상품 상세 - 지그재그'
+        return d
+
+    def test_wait_wakes_when_title_becomes_checkout(self):
+        d = self.wait_detector(['상품 상세 - 지그재그', '결제 - 지그재그'])
+        started = time.perf_counter()
+        with mock.patch.object(config, 'AUTO_TITLE_POLL_SEC', 0.01):
+            self.assertFalse(d.wait(5))
+        self.assertLess(time.perf_counter() - started, 1)
+        self.assertTrue(d.title_woke)
+        self.assertTrue(d.checkout_title)
+
+    def test_wait_full_when_title_not_checkout(self):
+        d = self.wait_detector(['상품 상세 - 지그재그', '장바구니 - 지그재그'])
+        started = time.perf_counter()
+        with mock.patch.object(config, 'AUTO_TITLE_POLL_SEC', 0.01):
+            self.assertFalse(d.wait(0.15))
+        self.assertGreaterEqual(time.perf_counter() - started, 0.14)
+        self.assertFalse(d.title_woke)
+
+    def test_wait_stops_on_stop(self):
+        d = self.wait_detector(['상품 상세 - 지그재그'])
+        d._stop_event.set()
+        self.assertTrue(d.wait(5))
 
     def test_new_screen_after_analysis(self):
         d, app = self.detector(Script(H1, H1, H2, H2))
