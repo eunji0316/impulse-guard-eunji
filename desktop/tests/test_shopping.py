@@ -18,6 +18,7 @@ EXPECTED_MALL = {
     'news_page': False,
     'checkout_musinsa': True,     # 결제 화면 (B-4, 사용자가 개인정보를 가려서 넣음)
     'checkout_zigzag': True,
+    'checkout_zigzag_benefit': True,   # 결제 금액 버그 화면 (구매 혜택 금액을 결제 금액으로 기록)
 }
 
 

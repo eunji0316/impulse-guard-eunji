@@ -1,6 +1,6 @@
 """감지 로그 (B-4)
 
-- detect.log: 감지 결과를 한 줄씩 (시간, 출처, 단계, 쇼핑몰, 금액, 점수와 근거, 중복 여부, 동작, OCR 시간)
+- detect.log: 감지 결과를 한 줄씩 (시간, 출처, 단계, 쇼핑몰, 금액, 점수와 근거, 중복 여부, 동작, OCR 시간, 결제 화면이면 금액 라벨)
   같은 화면이라 OCR을 건너뛴 회차처럼 자주 생기는 일은 DEBUG로 파일에만 남긴다.
 - 콘솔: 단계가 바뀌었거나 동작(팝업, 서버 기록)이 있을 때만 출력한다. 3초마다 같은 줄이 쌓이지 않게
 - ocr_samples.jsonl (save_ocr_text가 true일 때만): C-1 쇼핑 화면 분류 모델의 학습 데이터
@@ -96,6 +96,10 @@ class DetectLog:
             parts.append(f'OCR {ocr_sec:.1f}초')
         if note:
             parts.append(note)
+        if stage == stage_mod.CHECKOUT:
+            # 결제 금액을 어느 라벨 옆에서 찾았는지 (금액을 잘못 고른 경우 원인을 찾으려고). 줄 맨 끝에 붙인다
+            label = analysis.page.total_label if analysis.page else ''
+            parts.append(f'금액 라벨 {label}' if label else '금액 라벨 못 찾음')
         line = ' | '.join(parts)
         with self._lock:
             self.logger.info(line)
