@@ -121,7 +121,7 @@ if ($action === 'setting') {
 // 상품 하나에 대한 차단/충동구매 판단
 // log가 true면 기록 1건도 저장한다 (데스크톱이 요청 한 번으로 판단과 기록을 함께 하도록)
 //   차단 시간이면 blocked(통계의 차단 횟수에 들어감), 아니면 detect. 저장한 이벤트는 event로 돌려준다
-// reasons: 충동구매로 본 이유 [{code, text}]. 비어 있지 않으면 is_impulse가 1이다
+// reasons: 충동구매로 본 이유 [{code, text}]. 비어 있지 않으면 is_impulse가 1이다. is_checkout이면 checkout 이유가 맨 앞
 // orig_price, discount_rate, is_checkout은 지금은 저장만 한다. 위험도 반영은 C단계
 if ($action === 'check') {
     $site      = ipp_api_site($body, $client);
@@ -130,7 +130,8 @@ if ($action === 'check') {
     $info      = ipp_api_detect_info($body);
 
     $st       = ipp_setting_get($mb_id);
-    $reasons  = ipp_impulse_reasons($price, 'shopping', G5_TIME_YMDHIS, $item_name, $mb_id);   // 차단 사이트는 모두 쇼핑몰
+    // 차단 사이트는 모두 쇼핑몰. 결제 화면이면 checkout 이유가 붙어 항상 충동구매 팝업 대상이 된다 (B-4)
+    $reasons  = ipp_impulse_reasons($price, 'shopping', G5_TIME_YMDHIS, $item_name, $mb_id, array('is_checkout' => $info['is_checkout']));
     $blocking = ipp_is_blocking($mb_id, $site);   // 전체 차단이 켜져 있거나 site가 ''면 차단 시간인지만, 아니면 사이트 목록도 본다
     $result   = array(
         'is_blocking' => $blocking,
