@@ -33,16 +33,34 @@ class ApiResult:
     offline: bool = False        # 서버에 닿지 못함 (시간 초과, 연결 거부, 토큰 없음 등)
 
 
+def auto_settings(data=None):
+    """local_config.json의 "auto_detect" 값을 config.AUTO_DETECT_DEFAULTS에 덮어쓴다. 잘못된 값은 기본값"""
+    out = dict(config.AUTO_DETECT_DEFAULTS)
+    data = data if isinstance(data, dict) else {}
+    for key in ('enabled', 'save_ocr_text'):
+        if isinstance(data.get(key), bool):
+            out[key] = data[key]
+    limits = {'interval_sec': (1, 60), 'same_order_minutes': (0, 24 * 60), 'blocked_repeat_sec': (0, 24 * 3600)}
+    for key, (lo, hi) in limits.items():
+        v = data.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi:
+            out[key] = v
+    return out
+
+
 def load_config(path=None):
-    """local_config.json 읽기. 파일이 없거나 깨졌으면 토큰 없는 기본값 (→ 오프라인 모드)"""
+    """local_config.json 읽기. 파일이 없거나 깨졌으면 토큰 없는 기본값 (→ 오프라인 모드)
+    auto: 자동 감지 설정 (auto_settings)"""
     path = path or os.path.join(DESKTOP_DIR, config.LOCAL_CONFIG)
-    conf = {'server': config.DEFAULT_SERVER, 'token': '', 'timeout_sec': config.SERVER_TIMEOUT_SEC, 'error': ''}
+    conf = {'server': config.DEFAULT_SERVER, 'token': '', 'timeout_sec': config.SERVER_TIMEOUT_SEC, 'error': '',
+            'auto': auto_settings()}
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
         conf['server'] = str(data.get('server') or conf['server']).rstrip('/')
         conf['token'] = str(data.get('token') or '').strip()
         conf['timeout_sec'] = float(data.get('timeout_sec') or conf['timeout_sec'])
+        conf['auto'] = auto_settings(data.get('auto_detect'))
     except FileNotFoundError:
         conf['error'] = f'{config.LOCAL_CONFIG} 파일이 없습니다'
     except (ValueError, OSError) as e:
@@ -166,6 +184,16 @@ class Client:
         if not st or not st.get('is_blocking'):
             return 0
         return max(0, int(st.get('block_remain', 0) - self.setting_age()))
+
+    def is_blocking_for(self, site):
+        """캐시된 설정으로 이 쇼핑몰이 지금 차단 대상인지 (서버 ipp_is_blocking()과 같은 규칙, B-4)
+        쇼핑몰 전체 차단(block_all, 없으면 켬)이면 모두, 끄면 켜 둔 사이트만. 사이트를 모르면('') 차단 시간만 본다"""
+        if not self.block_remain():
+            return False
+        st = self._setting or {}
+        if st.get('block_all', True) or not site:
+            return True
+        return any(s.get('code') == site and s.get('on') for s in st.get('sites', []))
 
     def site_hints(self):
         """서버 사이트 목록의 이름 {코드: [이름]} (사이트 찾기에 더한다)"""

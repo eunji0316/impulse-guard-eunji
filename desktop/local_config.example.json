@@ -1,5 +1,12 @@
 {
   "server": "http://localhost:8001",
   "token": "",
-  "timeout_sec": 2
+  "timeout_sec": 2,
+  "auto_detect": {
+    "enabled": true,
+    "interval_sec": 3,
+    "same_order_minutes": 10,
+    "blocked_repeat_sec": 60,
+    "save_ocr_text": false
+  }
 }

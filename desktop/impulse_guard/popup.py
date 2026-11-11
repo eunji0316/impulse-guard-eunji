@@ -209,8 +209,9 @@ class ImpulsePopup(_Window):
         # ── 묻는 화면 ──
         self.ask = tk.Frame(self.card, bg=C['card'])
         self.ask.pack(fill='both', padx=px(22), pady=px(20))
-        self.label(self.ask, '잠깐! 충동구매일 수 있어요', 15, True).pack(fill='x')
-        self.label(self.ask, '결제하기 전에 한 번만 더 생각해 볼까요?', 10, fg=C['sub']).pack(fill='x', pady=(px(2), 0))
+        self.title_label = self.label(self.ask, view.title, 15, True)
+        self.title_label.pack(fill='x')
+        self.label(self.ask, view.subtitle, 10, fg=C['sub'], wraplength=self.wrap).pack(fill='x', pady=(px(2), 0))
 
         item = tk.Frame(self.ask, bg=C['item'])
         item.pack(fill='x', pady=(px(14), 0))

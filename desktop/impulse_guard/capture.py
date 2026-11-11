@@ -1,13 +1,51 @@
 """화면 캡처
 
 지금은 원본처럼 주 모니터 전체를 캡처한다. (활성 창만 캡처하는 것은 이후 단계)
+자동 감지(B-4)는 grab_for_detect()만 부른다. B-5(활성 창만 캡처, 이미지 축소)는 이 함수 안쪽만 바꾸면 된다.
 반환 배열은 원본과 같다: mss가 주는 BGRA에서 알파 채널만 뺀 3채널(실제 순서는 BGR).
 원본은 이 값을 RGB라고 부르며 그대로 OCR에 넘기므로, 판정을 맞추려고 순서를 바꾸지 않는다.
 캡처 이미지는 파일로 저장하지 않는다 (개인정보 보호).
 """
+from dataclasses import dataclass
+
 import numpy as np
 
 from . import config
+
+
+@dataclass
+class Frame:
+    """자동 감지 한 회차의 캡처. img는 분석 뒤 바로 버린다 (파일로 저장하지 않음)"""
+    img: np.ndarray
+    foreground_title: str = ''   # 캡처할 때 맨 앞 창 제목 (우리 콘솔이면 건너뛴다)
+
+
+def grab_for_detect():
+    """자동 감지용 캡처. 지금은 F4와 같은 주 모니터 전체 (B-5에서 활성 창만, 축소로 바꿀 자리)"""
+    return Frame(img=grab_screen(), foreground_title=foreground_title())
+
+
+def foreground_title():
+    """맨 앞 창의 제목 (Windows가 아니거나 실패하면 '')"""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        n = user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        return buf.value
+    except Exception:
+        return ''
+
+
+def set_console_title(title):
+    """이 프로그램 콘솔 창의 제목을 정한다 (자동 감지가 자기 콘솔을 쇼핑 화면으로 오인하지 않게)"""
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleTitleW(title)
+    except Exception:
+        pass
 
 
 def grab_screen():

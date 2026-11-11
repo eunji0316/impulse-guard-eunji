@@ -345,7 +345,7 @@ class TestApp(TkCase):
         app = main.App(client, self.host, analyze=lambda: self.analyzed.append(1) or a)
         made_in = []
         orig_show = app.show
-        app.show = lambda kind, v: (made_in.append(threading.current_thread()), orig_show(kind, v))
+        app.show = lambda kind, v, **kw: (made_in.append(threading.current_thread()), orig_show(kind, v, **kw))
         return app, fake, made_in
 
     def press_f4(self, app):

@@ -160,3 +160,10 @@ FRAME_HASH_SIZE = 16
 FRAME_SAME_DISTANCE = 6          # 직전 분석 화면과 이 이하로 다르면 같은 화면 (OCR 생략)
 ORDER_SAME_DISTANCE = 20         # 결제 금액을 못 읽었을 때, 이 이하로 다르면 같은 주문
 CHECKOUT_NAME_MINUTES = 30       # 결제 화면의 상품명: 같은 쇼핑몰에서 이 시간 안에 본 마지막 상품 이름을 쓴다
+CONSOLE_TITLE = 'impulse-guard 감지 프로그램'   # 콘솔 창 제목. 맨 앞 창이 이 제목이면 자동 감지를 건너뛴다
+# 로그 (desktop 폴더 기준, Git에 올리지 않음). 캡처 이미지는 어디에도 저장하지 않는다
+LOG_DIR = 'logs'
+LOG_FILE = 'detect.log'          # 감지 결과 한 줄씩 (1MB × 5개 순환)
+LOG_MAX_BYTES = 1_000_000
+LOG_BACKUPS = 5
+OCR_SAMPLE_FILE = 'ocr_samples.jsonl'   # save_ocr_text가 true일 때만. 상품 화면/쇼핑 아님, 개인정보 마스킹
