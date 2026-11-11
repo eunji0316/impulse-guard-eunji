@@ -71,18 +71,51 @@ class TestSamples(unittest.TestCase):
         self.assertEqual(self.analyze(cs.CART).stage.stage, stage.PRODUCT)
 
     def test_real_images(self):
-        """실제 캡처 4장: 상품 화면 3장, 뉴스는 쇼핑 아님. 결제 점수는 모두 0"""
+        """실제 캡처: 상품 화면 3장과 뉴스는 결제 점수 0, 결제 화면 2장은 결제 화면"""
         expected = {'coupang_product': stage.PRODUCT, 'musinsa_product': stage.PRODUCT,
-                    'zigzag_product': stage.PRODUCT, 'news_page': stage.NONE}
+                    'zigzag_product': stage.PRODUCT, 'news_page': stage.NONE,
+                    'checkout_musinsa': stage.CHECKOUT, 'checkout_zigzag': stage.CHECKOUT}
         for name in cache.names():
             with self.subTest(name=name):
                 img, boxes, reread = cache.load(name)
                 a = main.analyze_boxes(boxes, img, reread)
                 self.assertEqual(a.stage.stage, expected[name])
-                self.assertEqual(a.stage.score, 0)
+                if expected[name] != stage.CHECKOUT:
+                    self.assertEqual(a.stage.score, 0)
+
+    def test_real_checkout_musinsa(self):
+        """무신사 주문서: 총 결제 금액 79,000원 (OCR은 '28%6 79,000원'으로 읽음, 할인율이 같은 상자에 붙어 있음)"""
+        img, boxes, reread = cache.load('checkout_musinsa')
+        a = main.analyze_boxes(boxes, img, reread)
+        self.assertGreaterEqual(a.stage.score, 10)
+        self.assertEqual((a.page.site, a.amount, a.page.total_label), ('musinsa', 79000, '총결제금액'))
+
+    def test_real_checkout_zigzag(self):
+        """지그재그 결제: '총 결제금액'을 '좀 결제금억'으로 읽고, 결제 버튼은 못 읽는다.
+        OCR 오인식 보정과 '결제 동의' 키워드로 결제 화면, 바로 아래 카드 광고 금액(174,010원)이 아니라 같은 줄의 224,910원"""
+        img, boxes, reread = cache.load('checkout_zigzag')
+        a = main.analyze_boxes(boxes, img, reread)
+        self.assertIn(('총결제금액', 3), a.stage.matched)
+        self.assertIn(('결제동의', 2), a.stage.matched)
+        self.assertGreaterEqual(a.stage.score, config.CHECKOUT_MIN_SCORE + 2)     # 기준선에 겨우 걸리지 않게
+        self.assertEqual((a.page.site, a.amount, a.page.total_label), ('zigzag', 224910, '총결제금액'))
+
+
+class TestOcrFixes(unittest.TestCase):
+    def test_misread_label(self):
+        self.assertEqual(stage.normalize('좀 결제금억'), '총결제금액')
+        self.assertEqual(stage.checkout_score('좀 결제금억')[1], [('총결제금액', 3)])
+        b = cs.boxes([('좀 결제금억', 40, 300, 80), ('9,900원', 400, 300, 80)])
+        self.assertEqual(price.find_checkout_total(b), (9900, '총결제금액'))
 
 
 class TestCheckoutTotal(unittest.TestCase):
+    def test_same_line_beats_closer_line_below(self):
+        """같은 줄 오른쪽 끝의 금액이 바로 아래 줄의 광고 금액보다 우선"""
+        b = cs.boxes([('총 결제금액', 40, 300, 80, 16), ('224,910원', 700, 300, 80, 16),
+                      ('신한카드는 174,910원', 70, 340, 140, 14)])
+        self.assertEqual(price.find_checkout_total(b)[0], 224910)
+
     def test_label_priority(self):
         """'최종 결제금액'이 '결제하기' 버튼의 금액보다 우선"""
         b = cs.boxes([('결제하기 10,000원', 40, 400, 200), ('최종 결제금액', 40, 300, 140), ('12,500원', 400, 300, 100)])

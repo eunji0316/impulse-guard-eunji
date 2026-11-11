@@ -494,11 +494,15 @@ def analyze(boxes, img=None, reread=None):
 
 # ── 결제 화면의 결제 금액 (B-4) ────────────────────────────────
 
+from .stage import normalize  # noqa: E402  (stage는 price를 쓰지 않으므로 순환 없음)
+
 def find_checkout_total(boxes):
     """결제 화면에서 결제 금액 (금액, 라벨). 못 찾으면 (None, '')
 
     config.CHECKOUT_TOTAL_LABELS 순서(최종 결제금액 → 총 결제금액 → ... → 결제하기 버튼)로 라벨을 찾고,
-    라벨과 같은 상자 안, 같은 줄 오른쪽, 바로 아래(상자 높이의 CHECKOUT_TOTAL_BELOW배 안) 중 가장 가까운 가격을 고른다.
+    라벨과 같은 상자 안 → 같은 줄 오른쪽 → 바로 아래(상자 높이의 CHECKOUT_TOTAL_BELOW배 안) 순서로, 같은 순위에서는 가장 가까운 가격을 고른다.
+    같은 줄의 금액은 멀리 있어도 아래 줄보다 우선한다 (실제 캡처: 지그재그 '총 결제금액 … 224,910원' 바로 아래에
+    '신한카드는 174,910원' 광고 줄이 있다).
     """
     prices = [c for c in find_tokens(boxes)[0]
               if config.PRICE_MIN <= c.value <= config.PRICE_MAX and c.features.get('format_ok')]
@@ -507,21 +511,21 @@ def find_checkout_total(boxes):
     for label in config.CHECKOUT_TOTAL_LABELS:
         best = None
         for b in boxes:
-            if label not in ''.join(b.text.split()):
+            if label not in normalize(b.text):            # 공백 무시, OCR 오인식 보정 ('좀 결제금억' → '총결제금액')
                 continue
             h = max(b.h, 1)
             for c in prices:
                 inside = b.x - 1 <= c.box[0] and c.box[2] <= b.x2 + 1 and _same_line(b.y, b.y2, c.box[1], c.box[3])
                 if inside:
-                    dist = 0
+                    rank = (0, 0)
                 elif _same_line(b.y, b.y2, c.box[1], c.box[3]) and c.box[0] >= b.x2 - h:
-                    dist = c.box[0] - b.x2                              # 같은 줄 오른쪽
+                    rank = (1, c.box[0] - b.x2)                                         # 같은 줄 오른쪽
                 elif 0 <= c.box[1] - b.y2 <= h * config.CHECKOUT_TOTAL_BELOW and c.box[2] >= b.x and c.box[0] <= b.x2 + h * 4:
-                    dist = (c.box[1] - b.y2) * 3 + abs(c.box[0] - b.x)  # 바로 아래 (같은 줄보다 덜 우선)
+                    rank = (2, (c.box[1] - b.y2) * 3 + abs(c.box[0] - b.x))             # 바로 아래
                 else:
                     continue
-                if best is None or dist < best[0]:
-                    best = (dist, c.value)
+                if best is None or rank < best[0]:
+                    best = (rank, c.value)
         if best is not None:
             return best[1], label
     return None, ''

@@ -335,14 +335,17 @@ class App:
         return True
 
     def _item_name(self, a):
-        """상품명. 결제 화면에서 못 읽었으면 같은 쇼핑몰에서 최근 본 상품, 그것도 없으면 '쇼핑몰 이름 주문'"""
+        """상품명. 결제 화면은 같은 쇼핑몰에서 최근(30분) 본 상품 → 결제 화면에서 읽은 이름 → '쇼핑몰 이름 주문' 순서
+        (결제 화면의 상품 영역은 상품명보다 브랜드명이 크게 잡히기도 해서 상품 화면에서 읽은 이름을 먼저 쓴다)"""
         name = a.page.item_name if a.page else ''
-        if name or not a.is_checkout:
+        if not a.is_checkout:
             return name
         site = a.page.site if a.page else ''
         seen = self.last_product.get(site)
         if seen and seen[0] and self.clock() - seen[2] <= config.CHECKOUT_NAME_MINUTES * 60:
             return seen[0]
+        if name:
+            return name
         site_name = (self.client.site_hints().get(site) or [''])[0] or site
         return f'{site_name} 주문' if site_name else '쇼핑몰 주문'
 

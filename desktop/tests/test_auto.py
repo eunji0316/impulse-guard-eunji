@@ -290,6 +290,18 @@ class TestHandleAuto(TkCase):
         self.assertEqual(self.fake.count('check'), checks + 1)
         self.close_window(app)
 
+    def test_checkout_prefers_recent_product_name(self):
+        """결제 화면에서 읽은 이름(브랜드명이 잡히기도 함)보다 같은 쇼핑몰에서 최근 본 상품 이름을 먼저 쓴다"""
+        app = self.make_app(check=(200, CHECKOUT_RESULT))
+        img, boxes, reread = cache.load('checkout_musinsa')
+        real = main.analyze_boxes(boxes, img, reread)
+        self.assertTrue(real.page.item_name)                     # 결제 화면에서도 무언가 읽힌다
+        app.last_product['musinsa'] = ('밍크퍼 후드 집업 자켓', 109000, self.clock())
+        self.handle(app, real, H1)
+        self.assertEqual(self.fake.calls[-1]['item_name'], '밍크퍼 후드 집업 자켓')
+        self.assertEqual(self.fake.calls[-1]['price'], 79000)
+        self.close_window(app)
+
     def test_checkout_without_known_product_uses_site_name(self):
         app = self.make_app(check=(200, CHECKOUT_RESULT))
         self.handle(app, self.musinsa_checkout, H1)

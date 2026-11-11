@@ -38,8 +38,11 @@ class StageResult:
 
 
 def normalize(text):
-    """공백을 모두 뺀다 (OCR 띄어쓰기 차이 무시)"""
-    return ''.join(text.split())
+    """공백을 모두 빼고 OCR이 자주 틀리는 글자를 고친다 (config.CHECKOUT_OCR_FIXES, 예: '좀 결제금억' → '총결제금액')"""
+    text = ''.join(text.split())
+    for wrong, right in config.CHECKOUT_OCR_FIXES.items():
+        text = text.replace(wrong, right)
+    return text
 
 
 def checkout_score(text, keywords=None):
