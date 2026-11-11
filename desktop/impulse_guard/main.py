@@ -25,7 +25,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import capture, config, ocr, popup_model
+from . import capture, config, frame, ocr, popup_model
 from .dedup import NoticeGate, RecentOrders
 from .detect_log import DetectLog, NullLog
 from .detector import page as page_info, price, shopping, stage as stage_mod
@@ -40,6 +40,7 @@ class Analysis:
     page: page_info.PageInfo = None
     boxes: list = None
     stage: stage_mod.StageResult = None
+    frame_hash: int = None       # 분석한 화면의 해시 (F4 캡처, 같은 주문 판단에 쓴다)
 
     @property
     def is_shopping(self):
@@ -188,6 +189,7 @@ class App:
         self.orders = RecentOrders(self.settings['same_order_minutes'] * 60, clock=clock)
         self.gate = NoticeGate(self.settings['blocked_repeat_sec'], clock=clock)
         self.last_product = {}            # 쇼핑몰 → (상품명, 금액, 본 시각). 결제 화면의 상품명으로 쓴다
+        self.last_frame_hash = None       # F4가 마지막으로 분석한 화면. 자동 감지는 이 화면을 다시 OCR하지 않는다
         self.was_shopping = False         # 자동 감지가 직전에 분석한 화면이 쇼핑 화면이었는지
 
     # ── F4 ─────────────────────────────────────────────────
@@ -201,8 +203,10 @@ class App:
 
     def _capture_and_analyze(self):
         img = capture.grab_screen()
+        h = frame.dhash(img)
         a = analyze_image(img, self.client.site_hints())
         del img                           # 캡처 이미지는 저장하지 않고 바로 버린다
+        a.frame_hash = h
         return a
 
     def _prepare(self):
@@ -224,11 +228,23 @@ class App:
             if r is not None and r.offline:
                 print("  (오프라인이라 알림 창은 띄우지 않았습니다)")
             plan = popup_model.build(a, r, self.client.block_remain())
-            self.log.event('f4', a, action=plan[0] if plan else '', ocr_sec=ocr_sec,
-                           note=self._server_note(r) if r is not None else '')
+            if a.frame_hash is not None:
+                self.last_frame_hash = a.frame_hash
+            actions = None
+            if a.is_checkout and plan and plan[0] == 'impulse':
+                # F4로 띄운 결제 화면 팝업도 같은 주문으로 기억한다 (자동 감지가 같은 주문에 팝업을 또 띄우지 않게)
+                site = a.page.site if a.page else ''
+                order = self.orders.see(site, a.amount, a.frame_hash).order
+                view = plan[1]
+                actions = popup_model.Actions(self.client, view,
+                                              on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
+            elif not a.is_checkout:
+                self.orders.left()
+            note = self._server_note(r) if r is not None else ''
+            self.log.event('f4', a, action=plan[0] if plan else '', ocr_sec=ocr_sec, note=self._popup_note(plan, note))
             if plan:
                 site = a.page.site if a.page else ''
-                self.ui.post(lambda: self.show(*plan, site=site, source='f4'))
+                self.ui.post(lambda: self.show(*plan, actions=actions, site=site, source='f4'))
                 shown = True
         except Exception as e:
             print(f"!!! 분석 중 오류가 발생했습니다: {e}")
@@ -327,7 +343,7 @@ class App:
             order = v.order
             actions = popup_model.Actions(self.client, view,
                                           on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
-            self.log.event('auto', a, action='popup', ocr_sec=ocr_sec, note=self._server_note(r))
+            self.log.event('auto', a, action='popup', ocr_sec=ocr_sec, note=self._popup_note(plan, self._server_note(r)))
             self.ui.post(lambda: self.show(kind, view, actions=actions, site=site))
         else:
             self.log.event('auto', a, action='blocked', ocr_sec=ocr_sec, note=self._server_note(r))
@@ -356,6 +372,13 @@ class App:
     def _sample(self, a):
         if self.log.save_ocr_text and a.boxes:
             self.log.sample(a, ocr.full_text(a.boxes))
+
+    @staticmethod
+    def _popup_note(plan, note):
+        """로그에 팝업 제목을 남긴다 (사용자가 본 문구를 로그로 확인할 수 있게)"""
+        if plan and plan[0] == 'impulse':
+            return f"{note} | 팝업 제목 '{plan[1].title}'" if note else f"팝업 제목 '{plan[1].title}'"
+        return note
 
     @staticmethod
     def _server_note(r):
@@ -395,11 +418,13 @@ def main():
     capture.set_console_title(config.CONSOLE_TITLE)
     print("화면 분석을 위한 OCR 모델을 로딩 중입니다. 최초 실행 시 약간의 시간이 걸립니다")
     ocr.get_reader()
-    auto = load_config()['auto']
+    conf = load_config()
+    auto = conf['auto']
     client = Client.from_config()
     client.connect()
     client.get_setting()
     log = DetectLog(save_ocr_text=auto['save_ocr_text'])
+    log.info(f"프로그램 시작. 자동 감지 설정: {conf['auto_source']} → {auto}", console=False)
     ui = popup.UiHost()                   # main 스레드에서 만든다
     app = App(client, ui, settings=auto, log=log)
     detector = (AutoDetector(app, auto['interval_sec'], log=log, exclude_programs=auto['exclude_programs'])
@@ -412,6 +437,7 @@ def main():
               f" 같은 주문은 {auto['same_order_minutes']}분 안에 다시 알리지 않습니다.")
     else:
         print("자동 감지: 꺼짐 (local_config.json의 auto_detect.enabled)")
+    print(f"자동 감지 설정 출처: {conf['auto_source']}")
     if detector and auto['exclude_programs']:
         print(f"감지 제외 프로그램 (맨 앞 창일 때): {', '.join(auto['exclude_programs'])}")
     print(f"[{config.HOTKEY.upper()}] 키를 누르면 지금 화면을 바로 분석합니다 (디버그용, 중복 검사 없음).")

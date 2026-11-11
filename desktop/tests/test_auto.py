@@ -140,6 +140,27 @@ class TestAutoDetectorTick(unittest.TestCase):
         app.busy = False
         self.assertEqual(d.tick(), 'analyzed')           # 바쁠 때 못 한 분석은 다음 회차에
 
+    def test_small_animation_counts_as_settled(self):
+        """광고 배너처럼 조금씩 움직이는 화면도 멈춘 것으로 본다 (같은 화면 기준 6비트보다 느슨한 12비트)"""
+        moving = H1 ^ 0b1111111111                     # 10비트 차이
+        d, app = self.detector(Script(H1, moving))
+        self.assertEqual([d.tick(), d.tick()], ['changing', 'analyzed'])
+
+    def test_wait_short_while_changing(self):
+        """바뀌는 중이면 1초 뒤 다시 보고, 그 밖에는 설정한 간격"""
+        d, _ = self.detector(Script(H1, H1, H1))
+        self.assertEqual(d.next_wait(), 3)
+        d.tick()                                       # changing
+        self.assertEqual(d.next_wait(), config.AUTO_SETTLE_SEC)
+        d.tick()                                       # analyzed
+        self.assertEqual(d.next_wait(), 3)
+
+    def test_screen_analyzed_by_f4_is_not_analyzed_again(self):
+        d, app = self.detector(Script(H2, H2))
+        app.last_frame_hash = H2                       # F4가 방금 이 화면을 분석함
+        self.assertEqual(d.tick(), 'same')
+        self.assertEqual(app.runs, [])
+
     def test_counts(self):
         d, _ = self.detector(Script(H1, H1, H1))
         for _ in range(3):
@@ -171,6 +192,21 @@ class TestAutoDetectorThread(unittest.TestCase):
         d.join(2)
         self.assertFalse(d.is_alive())
         self.assertEqual(len(app.runs), 1)               # 멈춘 뒤에는 더 분석하지 않는다
+
+    def test_start_is_logged(self):
+        tmp = tempfile.mkdtemp()
+        log = DetectLog(tmp, console=False)
+        d = auto_detect.AutoDetector(FakeApp(), 0.01, grab=Script(H1).grab, hasher=Script.hasher, log=log,
+                                     exclude_programs=['Code.exe'])
+        d.start()
+        time.sleep(0.05)
+        d.stop()
+        log.close()
+        with open(os.path.join(tmp, config.LOG_FILE), encoding='utf-8') as f:
+            first = f.readline()
+        shutil.rmtree(tmp, ignore_errors=True)
+        self.assertIn("자동 감지 시작: 0.01초 간격", first)
+        self.assertIn("['code.exe']", first)
 
     def test_error_in_tick_keeps_running(self):
         calls = []
@@ -300,6 +336,36 @@ class TestHandleAuto(TkCase):
         self.handle(app, real, H1)
         self.assertEqual(self.fake.calls[-1]['item_name'], '밍크퍼 후드 집업 자켓')
         self.assertEqual(self.fake.calls[-1]['price'], 79000)
+        self.close_window(app)
+
+    def test_f4_checkout_then_auto_does_not_popup_again(self):
+        """F4로 결제 화면 팝업을 띄우고 닫은 뒤, 자동 감지가 같은 주문을 보면 다시 띄우지 않는다 (사용자 테스트에서 발견)"""
+        app = self.make_app(check=(200, CHECKOUT_RESULT), decide=(200, {'ok': True}))
+        self.checkout.frame_hash = H1
+        app.analyze = lambda: self.checkout
+        self.assertTrue(app._busy.acquire(blocking=False))
+        with quiet():
+            app.work()                                          # F4 작업 스레드가 하는 일
+            self.assertTrue(self.pump(lambda: app.window is not None))
+        self.assertEqual(app.window.title_label['text'], '결제하기 전에 잠깐만요!')   # F4도 결제 화면 문구
+        self.assertTrue(app.window.take_focus)
+        self.assertIn("팝업 제목 '결제하기 전에 잠깐만요!'", self.log_lines()[-1])
+        self.assertEqual(app.last_frame_hash, H1)
+        with quiet():
+            app.window.on_x()
+            self.assertTrue(self.pump(lambda: app.window is None and self.fake.count('decide') == 1))
+        self.assertEqual(app.orders.orders[0].decision, 'close')
+        checks = self.fake.count('check')
+        self.assertFalse(self.handle(app, self.checkout, H2))  # 자동 감지: 같은 쇼핑몰+금액 → 같은 주문
+        self.assertEqual(self.fake.count('check'), checks)
+        self.assertIn('결정: close', self.log_lines()[-1])
+        self.checkout.frame_hash = None
+
+    def test_auto_popup_title_logged(self):
+        app = self.make_app(check=(200, CHECKOUT_RESULT))
+        self.handle(app, self.checkout, H1)
+        self.assertIn("→ popup", self.log_lines()[-1])
+        self.assertIn("팝업 제목 '결제하기 전에 잠깐만요!'", self.log_lines()[-1])
         self.close_window(app)
 
     def test_checkout_without_known_product_uses_site_name(self):
@@ -502,6 +568,18 @@ class TestAutoSettings(unittest.TestCase):
         self.assertEqual(s['same_order_minutes'], 10)            # 잘못된 값은 기본값
         self.assertFalse(s['save_ocr_text'])                     # true/false만 받는다
         self.assertEqual(server_client.auto_settings({'interval_sec': 0.1})['interval_sec'], 3)
+
+    def test_auto_source(self):
+        """자동 감지 설정을 어디서 읽었는지 (사용자 local_config.json에 auto_detect가 없던 문제 확인용)"""
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.assertEqual(server_client.load_config(os.path.join(here, 'local_config.example.json'))['auto_source'],
+                         'local_config.json')
+        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False, encoding='utf-8') as f:
+            json.dump({'server': 'http://localhost:8001', 'token': 'x'}, f)
+        try:
+            self.assertIn('auto_detect 없음', server_client.load_config(f.name)['auto_source'])
+        finally:
+            os.unlink(f.name)
 
     def test_example_file(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

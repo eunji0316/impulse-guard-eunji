@@ -56,7 +56,7 @@ def load_config(path=None):
     auto: 자동 감지 설정 (auto_settings)"""
     path = path or os.path.join(DESKTOP_DIR, config.LOCAL_CONFIG)
     conf = {'server': config.DEFAULT_SERVER, 'token': '', 'timeout_sec': config.SERVER_TIMEOUT_SEC, 'error': '',
-            'auto': auto_settings()}
+            'auto': auto_settings(), 'auto_source': '기본값'}   # auto_source: 자동 감지 설정을 어디서 읽었나 (로그용)
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
@@ -64,6 +64,8 @@ def load_config(path=None):
         conf['token'] = str(data.get('token') or '').strip()
         conf['timeout_sec'] = float(data.get('timeout_sec') or conf['timeout_sec'])
         conf['auto'] = auto_settings(data.get('auto_detect'))
+        conf['auto_source'] = (config.LOCAL_CONFIG if isinstance(data.get('auto_detect'), dict)
+                               else f'기본값 ({config.LOCAL_CONFIG}에 auto_detect 없음)')
     except FileNotFoundError:
         conf['error'] = f'{config.LOCAL_CONFIG} 파일이 없습니다'
     except (ValueError, OSError) as e:
