@@ -144,3 +144,19 @@ POPUP_COLORS = {
     'danger': '#c62828',      # 이유, 할인율, 오류 안내
     'point': '#2448c4',
 }
+
+# ── 자동 감지 (B-4) ────────────────────────────────────────────
+# 사람마다 바꾸는 값은 local_config.json의 "auto_detect"에서 덮어쓴다 (없으면 아래 기본값)
+AUTO_DETECT_DEFAULTS = {
+    'enabled': True,             # 자동 감지 켜기/끄기 (F4는 항상 동작)
+    'interval_sec': 3,           # 화면을 확인하는 간격. OCR은 화면이 바뀌고 한 간격 동안 멈췄을 때만 한다
+    'same_order_minutes': 10,    # 같은 주문을 마지막으로 본 뒤 이 시간 안에는 다시 기록/팝업하지 않는다
+    'blocked_repeat_sec': 60,    # 차단 안내 창을 닫은 뒤 같은 쇼핑몰에서 다시 띄우기까지의 시간
+    'save_ocr_text': False,      # C-1 학습용 OCR 원문 저장 (상품 화면/쇼핑 아님만, 개인정보 마스킹)
+}
+AUTO_STOP_WAIT_SEC = 10          # 종료할 때 진행 중인 OCR을 기다리는 최대 시간
+# 화면 지각 해시 (frame.py): 16×16 dHash = 256비트
+FRAME_HASH_SIZE = 16
+FRAME_SAME_DISTANCE = 6          # 직전 분석 화면과 이 이하로 다르면 같은 화면 (OCR 생략)
+ORDER_SAME_DISTANCE = 20         # 결제 금액을 못 읽었을 때, 이 이하로 다르면 같은 주문
+CHECKOUT_NAME_MINUTES = 30       # 결제 화면의 상품명: 같은 쇼핑몰에서 이 시간 안에 본 마지막 상품 이름을 쓴다
