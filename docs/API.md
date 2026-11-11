@@ -147,7 +147,7 @@ Authorization: Bearer 3f9a...(64자리)
 - `block_all`: 쇼핑몰 전체 차단 (회원 설정 화면 맨 위 토글, 기본 켬). `true`면 차단 시간에 `sites[].on`과 상관없이 모든 쇼핑 화면을 차단합니다. 위 예시에서 쿠팡은 꺼져 있지만 전체 차단이 켜져 있어 쿠팡도 차단됩니다.
 - `sites[].on`: 이 사이트가 차단 목록에 켜져 있는지. `block_all`이 `false`일 때만 차단에 쓰입니다. 사이트 목록은 `extend/ipp.extend.php`의 `IPP_BLOCK_SITES`
 - `keywords`: 회원 차단 키워드 (최대 20개, 각 20자)
-- 데스크톱 프로그램은 이 응답을 5분간 캐시합니다.
+- 데스크톱 프로그램은 이 응답을 1분간 캐시합니다 (B-4에서 5분 → 1분). 자동 감지는 쇼핑 아님 → 쇼핑 화면으로 바뀔 때 캐시를 무시하고 다시 받습니다.
 
 #### `check`: 상품 판단 (+ 감지 기록)
 
@@ -176,11 +176,11 @@ Authorization: Bearer 3f9a...(64자리)
 | `price` | | 판매가(할인가, 원). 음수는 0. 0이면 고액 판단을 할 수 없습니다 |
 | `orig_price` | | 원가(원). 음수는 0 (B-2 추가) |
 | `discount_rate` | | 할인율 %. 0~99 밖이면 0 (B-2 추가) |
-| `is_checkout` | | 결제 화면인지 (B-2 추가) |
+| `is_checkout` | | 결제 화면인지 (B-2 추가). `true`면 이유 `checkout`이 맨 앞에 붙어 `is_impulse`가 1이 됩니다 (B-4). 이때 `price`는 결제 금액, `page`는 `""` |
 | `log` | | `true`면 기록 1건을 저장하고 `event`, `bl_id`를 돌려줍니다. 차단 중(`is_blocking: true`)이면 이벤트 `blocked`, 아니면 `detect`입니다 (B-3에서 바뀜). 기본 false (B-2 추가) |
 | `page`, `url` | | `log: true`일 때 기록에 저장. `page`는 `product`, `cart`, `""` |
 
-`orig_price`, `discount_rate`, `is_checkout`은 **지금은 저장만 하고 위험도에는 쓰지 않습니다** (C단계에서 반영).
+`orig_price`, `discount_rate`는 **지금은 저장만 하고 위험도에는 쓰지 않습니다** (C단계에서 반영). `is_checkout`은 B-4부터 이유(`checkout`)에 반영합니다.
 
 응답
 
@@ -211,7 +211,8 @@ Authorization: Bearer 3f9a...(64자리)
   | 켬 (기본) | 차단 | **차단** | 차단 |
   | 끔 | 차단 | 차단 아님 | 차단 (차단 시간만 봄) |
 - `is_impulse`: 충동구매 감지 1, 아니면 0 (숫자). 규칙: 회원 키워드가 상품명에 있거나, 심야(23시~4시 전) 또는 고액(50,000원 이상). `reasons`가 비어 있지 않으면 1입니다.
-- `reasons`: 충동구매로 본 이유 목록 (B-3 추가). 중요한 것부터 `keyword`(회원 키워드) → `big`(고액) → `night`(심야) 순서입니다. 없으면 `[]`. `text`는 화면에 그대로 보여 줄 문구입니다 (심야: `"밤 11시~새벽 4시 사이의 심야 쇼핑이에요."`). 기준값은 `extend/ipp.extend.php`의 `IPP_DETECT_*`에서 가져옵니다.
+- `reasons`: 충동구매로 본 이유 목록 (B-3 추가). 중요한 것부터 `checkout`(결제 화면, B-4) → `keyword`(회원 키워드) → `big`(고액) → `night`(심야) 순서입니다. 결제 화면 문구: `"결제 직전이에요. 정말 지금 필요한 물건인지 한 번만 더 생각해 봐요."` 없으면 `[]`. `text`는 화면에 그대로 보여 줄 문구입니다 (심야: `"밤 11시~새벽 4시 사이의 심야 쇼핑이에요."`). 기준값은 `extend/ipp.extend.php`의 `IPP_DETECT_*`에서 가져옵니다.
+  - 판단(어떤 `code`인지)과 문구(`ipp_reason_text()`)를 나눠 두었습니다. 위험도 모델이 붙으면 `code`를 더하거나 문구만 바꾸고 응답 모양은 그대로 둡니다. 데스크톱 팝업 제목은 첫 번째 `code`로 고릅니다 (`checkout`이면 "결제하기 전에 잠깐만요!").
 - `keyword`: 상품명에서 찾은 첫 키워드. 없으면 `""` (예: 상품명 `[특가] 무선 이어폰` → `"특가"`)
 - `point`: 지금 포기하면 받을 포인트, `point2`: 24시간 참으면 받을 포인트(2배). 하루 상한(1,000P)은 반영하지 않은 값입니다.
 - `received`: 서버가 정리해서 받아들인 원가, 할인율, 결제 화면 여부
@@ -222,7 +223,15 @@ Authorization: Bearer 3f9a...(64자리)
     "keyword": "", "point": 500, "point2": 1000, "received": { "orig_price": 0, "discount_rate": 0, "is_checkout": false },
     "event": "blocked", "bl_id": 116 }
   ```
-- 데스크톱 팝업 (B-3): `is_blocking`이면 차단 안내 창, 아니고 `is_impulse`가 1이면 충동구매 팝업을 띄웁니다. 가격을 못 읽었으면(`price: 0`) 충동구매가 아니어도 팝업을 띄웁니다. 팝업에서 고른 결정은 `bl_id`로 `cooldown`, `giveup`, `decide`에 보냅니다.
+- 결제 화면 (B-4): 데스크톱이 결제 화면을 감지하면 `is_checkout: true`, 결제 금액을 `price`로, `page: ""`로 보냅니다. 아래는 오전 10시에 키워드 없는 상품으로 호출한 실제 응답입니다. `checkout` 이유 하나로 `is_impulse`가 1이 되고, 기록은 `bl_is_checkout = 1`로 저장됩니다.
+
+  ```json
+  { "ok": true, "is_blocking": false, "is_impulse": 1,
+    "reasons": [{ "code": "checkout", "text": "결제 직전이에요. 정말 지금 필요한 물건인지 한 번만 더 생각해 봐요." }],
+    "keyword": "", "point": 496, "point2": 992, "received": { "orig_price": 0, "discount_rate": 0, "is_checkout": true },
+    "event": "detect", "bl_id": 168 }
+  ```
+- 데스크톱 팝업 (B-3): `is_blocking`이면 차단 안내 창, 아니고 `is_impulse`가 1이면 충동구매 팝업을 띄웁니다. 가격을 못 읽었으면(`price: 0`) 충동구매가 아니어도 팝업을 띄웁니다. 결제 화면은 서버가 `checkout` 이유를 붙이므로 항상 팝업입니다 (B-4). 팝업에서 고른 결정은 `bl_id`로 `cooldown`, `giveup`, `decide`에 보냅니다.
 
 #### `log`: 기록
 

@@ -52,26 +52,39 @@ function ipp_detect_impulse($amount, $category, $datetime, $text = '', $mb_id = 
 }
 
 // 충동구매로 본 이유 목록 [{code, text}] (B-3, 데스크톱 팝업과 콘솔에 보여 줌)
-// ipp_detect_impulse()와 같은 기준이다. 목록이 비어 있지 않으면 is_impulse가 1이다
-// code: keyword(회원 키워드), big(고액), night(심야). 중요한 것부터 담는다
-function ipp_impulse_reasons($amount, $category, $datetime, $text = '', $mb_id = '') {
-    $reasons = array();
+// 판단(어떤 code인지)과 문구(ipp_reason_text)를 나눠 두었다. 위험도 모델이 붙으면 code를 더하거나
+// 문구 함수만 바꾸고, 응답 모양은 그대로 둔다. 목록이 비어 있지 않으면 is_impulse가 1이다
+// code: checkout(결제 화면, B-4), keyword(회원 키워드), big(고액), night(심야). 중요한 것부터 담는다
+// $ctx: is_checkout(데스크톱이 결제 화면을 감지함)
+function ipp_impulse_reasons($amount, $category, $datetime, $text = '', $mb_id = '', $ctx = array()) {
+    $found = array();   // code => 문구에 쓸 값
+    if (!empty($ctx['is_checkout'])) $found['checkout'] = array();
     if (IPP_USE_SETTING && $text !== '' && $mb_id) {
         $st = ipp_setting_get($mb_id);
         $kw = ipp_keyword_match($text, $st['st_keywords']);
-        if ($kw !== '') $reasons[] = array('code' => 'keyword', 'text' => "'{$kw}' 키워드가 들어 있어요.");
+        if ($kw !== '') $found['keyword'] = array('keyword' => $kw);
     }
-    if (!in_array($category, IPP_DETECT_CATEGORIES)) return $reasons;
-
-    if ($amount >= IPP_DETECT_AMOUNT) {
-        $reasons[] = array('code' => 'big', 'text' => number_format(IPP_DETECT_AMOUNT).'원 이상의 큰 금액이에요.');
+    if (in_array($category, IPP_DETECT_CATEGORIES)) {
+        if ($amount >= IPP_DETECT_AMOUNT) $found['big'] = array('amount' => IPP_DETECT_AMOUNT);
+        $hour = (int)date('G', strtotime($datetime));
+        if ($hour >= IPP_DETECT_NIGHT_START || $hour < IPP_DETECT_NIGHT_END) {
+            $found['night'] = array('start' => IPP_DETECT_NIGHT_START, 'end' => IPP_DETECT_NIGHT_END);
+        }
     }
-    $hour = (int)date('G', strtotime($datetime));
-    if ($hour >= IPP_DETECT_NIGHT_START || $hour < IPP_DETECT_NIGHT_END) {
-        $reasons[] = array('code' => 'night', 'text' => ipp_hour_label(IPP_DETECT_NIGHT_START).'~'
-            .ipp_hour_label(IPP_DETECT_NIGHT_END).' 사이의 심야 쇼핑이에요.');
-    }
+    $reasons = array();
+    foreach ($found as $code => $p) $reasons[] = array('code' => $code, 'text' => ipp_reason_text($code, $p));
     return $reasons;
+}
+
+// 이유 코드 → 화면에 보일 문구 (문구는 이 함수 한 곳에서만 정한다)
+function ipp_reason_text($code, $p = array()) {
+    switch ($code) {
+        case 'checkout': return '결제 직전이에요. 정말 지금 필요한 물건인지 한 번만 더 생각해 봐요.';
+        case 'keyword':  return "'{$p['keyword']}' 키워드가 들어 있어요.";
+        case 'big':      return number_format($p['amount']).'원 이상의 큰 금액이에요.';
+        case 'night':    return ipp_hour_label($p['start']).'~'.ipp_hour_label($p['end']).' 사이의 심야 쇼핑이에요.';
+    }
+    return '';
 }
 
 // 23 → '밤 11시', 4 → '새벽 4시', 19 → '저녁 7시'

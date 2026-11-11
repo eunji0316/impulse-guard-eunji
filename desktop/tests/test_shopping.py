@@ -16,6 +16,8 @@ EXPECTED_MALL = {
     'musinsa_product': True,
     'zigzag_product': True,
     'news_page': False,
+    'checkout_musinsa': True,     # 결제 화면 (B-4, 사용자가 개인정보를 가려서 넣음)
+    'checkout_zigzag': True,
 }
 
 
