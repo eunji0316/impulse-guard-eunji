@@ -188,6 +188,7 @@ class App:
         self.orders = RecentOrders(self.settings['same_order_minutes'] * 60, clock=clock)
         self.gate = NoticeGate(self.settings['blocked_repeat_sec'], clock=clock)
         self.last_product = {}            # 쇼핑몰 → (상품명, 금액, 본 시각). 결제 화면의 상품명으로 쓴다
+        self.was_shopping = False         # 자동 감지가 직전에 분석한 화면이 쇼핑 화면이었는지
 
     # ── F4 ─────────────────────────────────────────────────
     def on_hotkey(self):
@@ -208,7 +209,7 @@ class App:
         was_online = self.client.online
         if self.client.ensure_online() and not was_online:
             print_connection(self.client)
-        self.client.get_setting()         # 5분 캐시. 사이트 이름을 사이트 찾기에 더한다
+        self.client.get_setting()         # 1분 캐시. 사이트 이름을 사이트 찾기에 더한다
 
     def work(self):
         """F4 작업 스레드: 분석과 서버 요청. 창을 띄울 일이 있으면 main 스레드에 넘긴다"""
@@ -264,12 +265,18 @@ class App:
 
     def handle_auto(self, a, frame_hash, ocr_sec=None):
         """단계별 처리. 창을 띄우면 True (잠금은 창이 닫힐 때 풀린다)"""
+        entering = a.is_shopping and not self.was_shopping
+        self.was_shopping = a.is_shopping
         if not a.is_shopping:
             self.orders.left()
             self.log.event('auto', a, ocr_sec=ocr_sec)
             self._sample(a)
             return False
         site = a.page.site if a.page else ''
+        if entering:
+            # 쇼핑 아님 → 쇼핑 화면: 캐시(1분)를 무시하고 차단 상태를 서버에 다시 묻는다
+            # (상품 화면은 서버 check를 하지 않으므로, 막 시작한 차단을 놓치지 않게)
+            self.client.get_setting(force=True)
 
         if self.client.is_blocking_for(site):
             if not self.gate.allow(site):

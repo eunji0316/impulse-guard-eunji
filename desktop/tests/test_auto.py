@@ -326,6 +326,31 @@ class TestHandleAuto(TkCase):
         self.assertFalse(self.handle(app, musinsa_product, H1))  # 무신사는 꺼져 있음 → 차단 아님, 상품 화면
         self.assertEqual(self.fake.count('check'), 0)
 
+    def test_setting_refreshed_when_entering_shopping(self):
+        """쇼핑 아님 → 쇼핑 화면이면 캐시(1분)를 무시하고 설정을 다시 받는다. 쇼핑 화면이 이어지면 캐시를 쓴다"""
+        app = self.make_app()
+        base = self.fake.count('setting')
+        self.handle(app, self.product, H1)                      # 처음 본 쇼핑 화면 (직전: 쇼핑 아님)
+        self.assertEqual(self.fake.count('setting'), base + 1)
+        self.handle(app, self.product, H2)                      # 쇼핑 화면 → 쇼핑 화면: 다시 받지 않음
+        self.assertEqual(self.fake.count('setting'), base + 1)
+        self.handle(app, self.news, H3)                         # 쇼핑 아님
+        self.assertEqual(self.fake.count('setting'), base + 1)
+        self.handle(app, self.product, H1)                      # 다시 들어옴
+        self.assertEqual(self.fake.count('setting'), base + 2)
+
+    def test_block_started_just_now_is_caught(self):
+        """설정 캐시는 차단 전 것이어도, 쇼핑 화면에 들어서는 순간 다시 받아 차단 안내를 띄운다"""
+        app = self.make_app(check=(200, BLOCKED_RESULT))
+        self.handle(app, self.news, H1)
+        self.fake.responses['setting'] = (200, BLOCKING)        # 웹에서 방금 차단 시작
+        self.assertTrue(self.handle(app, self.product, H2))
+        self.assertIsInstance(app.window, popup.BlockedNotice)
+        self.close_window(app)
+
+    def test_cache_is_one_minute(self):
+        self.assertEqual(config.SETTING_CACHE_SEC, 60)
+
     def test_not_shopping(self):
         app = self.make_app()
         self.assertFalse(self.handle(app, self.news, H1))

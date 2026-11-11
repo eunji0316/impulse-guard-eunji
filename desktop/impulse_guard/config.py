@@ -117,7 +117,7 @@ API_PATH = '/ipp/api/client.php'
 CLIENT_NAME = 'desktop'              # 서버에 보내는 client 값
 SERVER_TIMEOUT_SEC = 2.0             # 응답이 이 시간을 넘으면 실패로 보고 감지만 계속
 RECONNECT_SEC = 60                   # 오프라인일 때 다시 연결을 시도하는 간격
-SETTING_CACHE_SEC = 300              # 회원 설정(차단 시간, 키워드) 캐시 5분
+SETTING_CACHE_SEC = 60               # 회원 설정(차단 시간, 키워드) 캐시 1분 (B-4에서 5분 → 1분)
 
 # ── 차단 팝업 (B-3 신규) ───────────────────────────────────────
 POPUP_MAX_REASONS = 2                # 팝업에 보여 줄 이유 개수

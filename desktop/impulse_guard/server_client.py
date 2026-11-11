@@ -5,7 +5,7 @@
   예외를 던지지 않고 ApiResult(ok=False, offline=True)를 돌려준다. 프로그램은 감지를 계속한다.
 - 시작할 때 me로 회원을 확인한다. 실패하면 오프라인 모드이고, F4를 누를 때 60초 간격으로 다시 연결해 본다.
   토큰이 틀리면(401) 다시 시도하지 않는다 (토큰을 다시 발급해야 함).
-- 회원 설정(차단 시간, 키워드)은 5분간 캐시한다. 남은 차단 시간은 서버가 준 남은 초로 계산한다 (PC 시계와 무관).
+- 회원 설정(차단 시간, 키워드)은 1분간 캐시한다 (config.SETTING_CACHE_SEC). 자동 감지는 쇼핑 화면에 들어설 때 캐시를 무시하고 다시 받는다. 남은 차단 시간은 서버가 준 남은 초로 계산한다 (PC 시계와 무관).
 - 캡처 이미지는 보내지 않는다. 상품명, 가격 등 필요한 값만 보낸다.
 - 테스트에서는 transport(실제 HTTP 호출 함수)와 clock(현재 시각 함수)을 바꿔 끼운다.
 - B-3부터 감지 작업 스레드와 팝업 버튼 스레드가 함께 부르므로 요청은 잠금(lock)으로 하나씩 보낸다.
@@ -163,9 +163,9 @@ class Client:
             self.connect()
         return self.online
 
-    # ── 회원 설정 (5분 캐시) ───────────────────────────────
+    # ── 회원 설정 (1분 캐시) ───────────────────────────────
     def get_setting(self, force=False):
-        """setting 응답. 캐시가 5분 안이면 캐시, 아니면 서버에 다시 묻는다. 실패하면 예전 캐시(없으면 None)"""
+        """setting 응답. 캐시가 SETTING_CACHE_SEC 안이면 캐시, 아니면(또는 force) 서버에 다시 묻는다. 실패하면 예전 캐시(없으면 None)"""
         fresh = self._setting_at is not None and self.clock() - self._setting_at < config.SETTING_CACHE_SEC
         if fresh and not force:
             return self._setting
