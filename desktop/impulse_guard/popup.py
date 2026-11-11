@@ -10,6 +10,13 @@
 창 두 가지
 - ImpulsePopup: 충동구매 팝업 (상품, 이유, 포인트, 버튼 세 개)
 - BlockedNotice: 차단 시간 안내 (남은 시간, 확인)
+
+포커스 (B-4)
+- F4로 띄운 창은 포커스를 가져온다 (사용자가 방금 키를 눌러 Windows가 대체로 허용한다).
+- 자동 감지로 띄운 창(take_focus=False)은 포커스를 억지로 가져가지 않고 작업 표시줄만 깜빡인다.
+  사용자가 브라우저에서 치던 Space/Enter가 팝업 버튼을 누르지 않게 하기 위해서다.
+- 창이 뜬 뒤 POPUP_INPUT_GUARD_SEC 동안은 버튼 입력을 무시한다 (창이 뜨는 순간의 클릭이 버튼에 들어가는 것 방지).
+- 창이 떠 있는 동안 POPUP_KEEP_TOP_MS마다 맨 위로 다시 올린다 (다른 항상 위 창에 가려지는 것 완화).
 """
 import queue
 import threading
@@ -120,11 +127,13 @@ class _Window:
 
     title = '충동구매 방지'
 
-    def __init__(self, host, on_closed=None):
+    def __init__(self, host, on_closed=None, take_focus=True):
         self.host = host
         self.on_closed = on_closed
+        self.take_focus = take_focus
         self.closed = False
-        self._afters = []
+        self.opened_at = time.monotonic()
+        self._afters = {}                       # 이름 → after 예약 번호 (창을 닫을 때 모두 취소)
         self.width = host.px(config.POPUP_WIDTH)
         self.wrap = self.width - host.px(2 * (16 + 22) + 12)   # 창 여백 + 카드 안쪽 여백 + 테두리, 글자 폭 여유
 
@@ -137,6 +146,46 @@ class _Window:
         self.card = tk.Frame(self.win, bg=C['card'], highlightthickness=1,
                              highlightbackground=C['border'], highlightcolor=C['border'])
         self.card.pack(fill='both', expand=True, padx=host.px(16), pady=host.px(16))
+        self.schedule('keep_top', config.POPUP_KEEP_TOP_MS, self._keep_top)
+
+    # 예약 작업 (같은 이름은 하나만)
+    def schedule(self, name, ms, fn):
+        old = self._afters.pop(name, None)
+        if old is not None:
+            self.win.after_cancel(old)
+        self._afters[name] = self.win.after(ms, fn)
+
+    def _keep_top(self):
+        """다른 항상 위 창에 가려지지 않게 맨 위로 다시 올린다 (포커스는 건드리지 않음)"""
+        if self.closed:
+            return
+        self.win.attributes('-topmost', True)
+        self.win.lift()
+        self.schedule('keep_top', config.POPUP_KEEP_TOP_MS, self._keep_top)
+
+    def input_ready(self):
+        """창이 뜬 직후의 입력은 무시한다 (사용자가 하던 클릭/키 입력이 버튼에 들어가지 않게)"""
+        return time.monotonic() - self.opened_at >= config.POPUP_INPUT_GUARD_SEC
+
+    def _guarded(self, command):
+        def run(*_):
+            if self.input_ready():
+                command()
+        return run
+
+    def flash(self):
+        """작업 표시줄 버튼을 깜빡여 창이 떴음을 알린다 (Windows만)"""
+        try:
+            import ctypes
+
+            class FLASHWINFO(ctypes.Structure):
+                _fields_ = [('cbSize', ctypes.c_uint), ('hwnd', ctypes.c_void_p), ('dwFlags', ctypes.c_uint),
+                            ('uCount', ctypes.c_uint), ('dwTimeout', ctypes.c_uint)]
+            hwnd = int(self.win.wm_frame(), 16)
+            info = FLASHWINFO(ctypes.sizeof(FLASHWINFO), hwnd, 0x3 | 0xC, 0, 0)   # 창과 작업 표시줄, 앞에 올 때까지
+            ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
+        except Exception:
+            pass
 
     # 위젯 만들기 도우미
     def label(self, parent, text, size=11, bold=False, fg=None, bg=None, **kw):
@@ -145,7 +194,7 @@ class _Window:
         return lb
 
     def button(self, parent, text, command, primary=True):
-        b = tk.Button(parent, text=text, command=command, relief='flat', bd=0, cursor='hand2',
+        b = tk.Button(parent, text=text, command=self._guarded(command), relief='flat', bd=0, cursor='hand2',
                       font=self.host.font(11, primary),
                       bg=C['primary'] if primary else C['secondary'],
                       fg='#ffffff' if primary else C['secondary_text'],
@@ -159,7 +208,7 @@ class _Window:
     def link(self, parent, text, command):
         lb = self.label(parent, text, 10, fg=C['sub'], cursor='hand2', font_kw={'underline': 1})
         lb.configure(anchor='center', justify='center')
-        lb.bind('<Button-1>', lambda e: command())
+        lb.bind('<Button-1>', self._guarded(command))
         lb.pack(fill='x', pady=(self.host.px(12), 0))
         return lb
 
@@ -173,6 +222,9 @@ class _Window:
         self.win.deiconify()
         self.win.lift()
         self.win.attributes('-topmost', True)
+        if not self.take_focus:
+            self.flash()
+            return
         try:
             self.win.focus_force()
         except tk.TclError:
@@ -182,8 +234,9 @@ class _Window:
         if self.closed:
             return
         self.closed = True
-        for after_id in self._afters:          # 창이 사라진 뒤 예약 작업이 불리지 않게
+        for after_id in self._afters.values():   # 창이 사라진 뒤 예약 작업이 불리지 않게
             self.win.after_cancel(after_id)
+        self._afters.clear()
         self.win.destroy()
         if self.on_closed:
             self.on_closed()
@@ -197,8 +250,8 @@ class ImpulsePopup(_Window):
 
     title = '충동구매 알림'
 
-    def __init__(self, host, view, actions, on_closed=None, link_url=''):
-        super().__init__(host, on_closed)
+    def __init__(self, host, view, actions, on_closed=None, link_url='', take_focus=True):
+        super().__init__(host, on_closed, take_focus)
         self.view = view
         self.actions = actions
         self.link_url = link_url
@@ -328,7 +381,8 @@ class ImpulsePopup(_Window):
         if out.show_link and self.link_url and self.timemachine_link is None:
             self.timemachine_link = self.link(self.result, '타임머신 보기', lambda: webbrowser.open(self.link_url))
         self.place()
-        self.close_btn.focus_set()
+        if self.take_focus:
+            self.close_btn.focus_set()
 
 
 class BlockedNotice(_Window):
@@ -336,8 +390,8 @@ class BlockedNotice(_Window):
 
     title = '쇼핑 차단 중'
 
-    def __init__(self, host, view, on_closed=None, clock=time.monotonic):
-        super().__init__(host, on_closed)
+    def __init__(self, host, view, on_closed=None, clock=time.monotonic, take_focus=True):
+        super().__init__(host, on_closed, take_focus)
         self.view = view
         self.clock = clock
         self.start = clock()
@@ -358,7 +412,8 @@ class BlockedNotice(_Window):
         self.ok_btn.pack_configure(pady=(px(16), 0))
         self.tick()
         self.place()
-        self.ok_btn.focus_set()
+        if take_focus:
+            self.ok_btn.focus_set()
 
     def remain(self):
         return max(0, int(self.view.remain_sec - (self.clock() - self.start)))
@@ -372,7 +427,5 @@ class BlockedNotice(_Window):
             return
         left = self.remain()
         self.time_label.configure(text=hms(left) if left > 0 else '차단 시간이 끝났어요')
-        while self._afters:                    # 이미 예약된 tick은 취소하고 하나만 남긴다
-            self.win.after_cancel(self._afters.pop())
         if left > 0:
-            self._afters.append(self.win.after(1000, self.tick))
+            self.schedule('tick', 1000, self.tick)   # 이미 예약된 tick은 취소하고 하나만 남긴다

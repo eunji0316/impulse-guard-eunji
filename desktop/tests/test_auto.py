@@ -246,6 +246,7 @@ class TestHandleAuto(TkCase):
         self.assertEqual((sent['orig_price'], sent['discount_rate']), (0, 0))
         w = app.window
         self.assertIsInstance(w, popup.ImpulsePopup)
+        self.assertFalse(w.take_focus)                            # 자동 감지 창은 포커스를 가져가지 않는다
         self.assertEqual(w.title_label['text'], '결제하기 전에 잠깐만요!')
         self.assertEqual(w.price_label['text'], '49,600원')
         self.assertEqual(w.view.orig_text, '')

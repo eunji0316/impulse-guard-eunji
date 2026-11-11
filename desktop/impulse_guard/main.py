@@ -227,7 +227,7 @@ class App:
                            note=self._server_note(r) if r is not None else '')
             if plan:
                 site = a.page.site if a.page else ''
-                self.ui.post(lambda: self.show(*plan, site=site))
+                self.ui.post(lambda: self.show(*plan, site=site, source='f4'))
                 shown = True
         except Exception as e:
             print(f"!!! 분석 중 오류가 발생했습니다: {e}")
@@ -354,18 +354,20 @@ class App:
         return '서버 연결 안 됨' if r.offline else f'서버 응답 실패: {r.msg}'
 
     # ── 창 ─────────────────────────────────────────────────
-    def show(self, kind, view, actions=None, site=''):
-        """main 스레드: 창 만들기. 창이 닫히면 잠금을 풀어 F4/자동 감지를 다시 받는다"""
+    def show(self, kind, view, actions=None, site='', source='auto'):
+        """main 스레드: 창 만들기. 창이 닫히면 잠금을 풀어 F4/자동 감지를 다시 받는다
+        source: f4면 포커스를 가져오고, auto면 가져가지 않고 작업 표시줄만 깜빡인다 (popup.py 맨 위 설명)"""
         from . import popup
+        take_focus = source == 'f4'
         try:
             if kind == 'blocked':
                 def closed():
                     self.gate.closed(site)    # 닫은 시각부터 blocked_repeat_sec 동안 같은 쇼핑몰은 다시 띄우지 않음
                     self._closed()
-                self.window = popup.BlockedNotice(self.ui, view, on_closed=closed)
+                self.window = popup.BlockedNotice(self.ui, view, on_closed=closed, take_focus=take_focus)
             else:
                 self.window = popup.ImpulsePopup(self.ui, view, actions or popup_model.Actions(self.client, view),
-                                                 on_closed=self._closed,
+                                                 on_closed=self._closed, take_focus=take_focus,
                                                  link_url=self.client.server + config.COOLDOWN_PAGE)
         except Exception:
             self._closed()

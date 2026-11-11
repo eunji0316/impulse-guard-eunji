@@ -124,6 +124,8 @@ POPUP_MAX_REASONS = 2                # 팝업에 보여 줄 이유 개수
 POPUP_TOP_MARGIN = 48                # 주 모니터 위쪽에서 창까지 거리 (px)
 POPUP_WIDTH = 420                    # 창 너비 (px, 높이는 내용에 맞춤)
 POPUP_UI_POLL_MS = 100               # 다른 스레드가 보낸 화면 작업을 확인하는 간격
+POPUP_INPUT_GUARD_SEC = 0.7          # 창이 뜬 뒤 이 시간 동안 버튼 입력 무시 (하던 클릭/키 입력이 버튼에 들어가지 않게)
+POPUP_KEEP_TOP_MS = 2000             # 창이 떠 있는 동안 맨 위로 다시 올리는 간격
 COOLDOWN_PAGE = '/ipp/cooldown.php'  # '타임머신 보기'로 여는 웹 화면
 # 한글 글꼴 후보 (앞에서부터 설치된 것을 쓴다. 없으면 tkinter 기본 글꼴)
 POPUP_FONTS = ['맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans CJK KR', 'Noto Sans KR', 'NanumGothic']
