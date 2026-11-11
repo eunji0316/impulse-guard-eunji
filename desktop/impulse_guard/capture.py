@@ -1,7 +1,8 @@
 """화면 캡처
 
-지금은 원본처럼 주 모니터 전체를 캡처한다. (활성 창만 캡처하는 것은 이후 단계)
-자동 감지(B-4)는 grab_for_detect()만 부른다. B-5(활성 창만 캡처, 이미지 축소)는 이 함수 안쪽만 바꾸면 된다.
+자동 감지와 F4는 grab_for_detect()로 맨 앞 창 영역만 캡처한다 (B-5, config.CAPTURE_ACTIVE_WINDOW).
+창 영역은 DwmGetWindowAttribute(그림자를 뺀 실제 창 영역)로 구하고 화면 밖으로 나간 부분은 자른다.
+못 구하면 원본처럼 주 모니터 전체(grab_screen). Frame.origin은 이미지 왼쪽 위의 화면 좌표 (팝업 영역을 지울 때 쓴다).
 반환 배열은 원본과 같다: mss가 주는 BGRA에서 알파 채널만 뺀 3채널(실제 순서는 BGR).
 원본은 이 값을 RGB라고 부르며 그대로 OCR에 넘기므로, 판정을 맞추려고 순서를 바꾸지 않는다.
 캡처 이미지는 파일로 저장하지 않는다 (개인정보 보호).
@@ -19,11 +20,59 @@ class Frame:
     img: np.ndarray
     foreground_title: str = ''   # 캡처할 때 맨 앞 창 제목 (우리 콘솔이면 건너뛴다)
     foreground_exe: str = ''     # 맨 앞 창의 실행 파일 이름 (예: 'chrome.exe'). 감지 제외 프로그램 확인용
+    origin: tuple = (0, 0)       # 이미지 왼쪽 위의 화면 좌표
+    scope: str = 'monitor'       # 'window' (맨 앞 창) / 'monitor' (주 모니터 전체)
 
 
 def grab_for_detect():
-    """자동 감지용 캡처. 지금은 F4와 같은 주 모니터 전체 (B-5에서 활성 창만, 축소로 바꿀 자리)"""
-    return Frame(img=grab_screen(), foreground_title=foreground_title(), foreground_exe=foreground_exe())
+    """자동 감지/F4용 캡처: 맨 앞 창 영역 (못 구하면 주 모니터 전체)"""
+    title, exe = foreground_title(), foreground_exe()
+    img, origin, scope = grab_active() if config.CAPTURE_ACTIVE_WINDOW else (grab_screen(), monitor_origin(), 'monitor')
+    return Frame(img=img, foreground_title=title, foreground_exe=exe, origin=origin, scope=scope)
+
+
+def foreground_rect():
+    """맨 앞 창의 화면 영역 (left, top, right, bottom). 최소화됐거나 못 구하면 None"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd or user32.IsIconic(hwnd):
+            return None
+        rect = wintypes.RECT()
+        DWMWA_EXTENDED_FRAME_BOUNDS = 9          # 보이지 않는 테두리/그림자를 뺀 영역
+        if ctypes.windll.dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS,
+                                                      ctypes.byref(rect), ctypes.sizeof(rect)) != 0:
+            if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                return None
+        return rect.left, rect.top, rect.right, rect.bottom
+    except Exception:
+        return None
+
+
+def clip_region(rect, screen, min_size=None):
+    """창 영역을 전체 화면(mss monitors[0]) 안으로 자른 mss 영역. 너무 작거나 없으면 None"""
+    if not rect:
+        return None
+    min_size = config.CAPTURE_MIN_SIZE if min_size is None else min_size
+    left, top = max(rect[0], screen['left']), max(rect[1], screen['top'])
+    right = min(rect[2], screen['left'] + screen['width'])
+    bottom = min(rect[3], screen['top'] + screen['height'])
+    if right - left < min_size or bottom - top < min_size:
+        return None
+    return {'left': left, 'top': top, 'width': right - left, 'height': bottom - top}
+
+
+def grab_active():
+    """(이미지, 왼쪽 위 화면 좌표, 'window'/'monitor')"""
+    import mss
+    with mss.mss() as sct:
+        region, scope = clip_region(foreground_rect(), sct.monitors[0]), 'window'
+        if region is None:
+            region, scope = sct.monitors[config.CAPTURE_MONITOR], 'monitor'
+        img = np.array(sct.grab(region))
+    return img[:, :, :3], (region['left'], region['top']), scope
 
 
 def foreground_exe():

@@ -181,23 +181,23 @@ class AutoDetector(threading.Thread):
         if amount_mode:
             self.last_analyzed = h
             img, fr.img = fr.img, None
-            t = self._timing(img, 'amount')
+            t = self._timing(img, 'amount', fr.scope)
             with timing.active(t):
-                self.app.run_amount(img, h, fr.foreground_title)
+                self.app.run_amount(img, h, fr.foreground_title, fr.origin)
             del img
             return AMOUNT
         if not self.app.try_begin():
             return SKIP_BUSY
         self.last_analyzed = h
         img, fr.img = fr.img, None
-        t = self._timing(img)
+        t = self._timing(img, scope=fr.scope)
         with timing.active(t):
             # 분석이 끝나면 app이 잠금을 푼다 (창을 띄우면 창이 닫힐 때). 제목은 app이 해시로만 바꿔 같은 주문 판단에 쓴다
             self.app.run_auto(img, h, fr.foreground_title)
         del img
         return ANALYZED
 
-    def _timing(self, img, source='auto'):
+    def _timing(self, img, source='auto', scope=''):
         """분석할 회차의 측정 객체: 기다린 시간과 이 회차의 캡처/해시 시간"""
         self._saw_change()
         t = timing.Timing(source)
@@ -212,7 +212,7 @@ class AutoDetector(threading.Thread):
         t.add('hash', self.hash_sec)
         shape = getattr(img, 'shape', None)
         if shape is not None and len(shape) >= 2:
-            t.info['화면'] = f'{shape[1]}x{shape[0]}'
+            t.info['화면'] = f'{shape[1]}x{shape[0]}' + {'window': ' (맨 앞 창)', 'monitor': ' (모니터 전체)'}.get(scope, '')
         self._forget_change()
         return t
 

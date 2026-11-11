@@ -275,9 +275,10 @@ class App:
         threading.Thread(target=self.work, daemon=True).start()
 
     def _capture_and_analyze(self):
-        key = title_key(capture.foreground_title())
         with timing.measure('capture'):
-            img = capture.grab_screen()
+            fr = capture.grab_for_detect()       # 자동 감지와 같이 맨 앞 창 영역 (F4를 누른 창)
+        key = title_key(fr.foreground_title)
+        img, fr.img = fr.img, None
         with timing.measure('hash'):
             h = frame.dhash(img)
         t = timing.current()
@@ -359,14 +360,14 @@ class App:
         w = p.window if p else None
         return bool(w and w.view.pending and not w.closed and not w.done and not w.busy)
 
-    def run_amount(self, img, frame_hash, title=None):
+    def run_amount(self, img, frame_hash, title=None, origin=None):
         """자동 감지 스레드: 팝업이 떠 있는 동안의 회차. 팝업 영역을 지우고 OCR해서 같은 주문의 결제 금액을 읽으면 채운다.
         잠금은 창이 잡고 있으므로 건드리지 않는다. 채웠으면 True"""
         p = self.pending
         if p is None:
             return False
         try:
-            mask_rect(img, p.window.screen_rect, capture.monitor_origin())
+            mask_rect(img, p.window.screen_rect, origin if origin is not None else capture.monitor_origin())
             a, ocr_sec = timed_analysis(self.analyze_frame, img)
             a.title_key = title_key(title)
             site = a.page.site if a.page else ''

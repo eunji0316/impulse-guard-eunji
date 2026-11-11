@@ -186,10 +186,10 @@ class TestAutoDetectorTick(unittest.TestCase):
         app.is_paused = True
         app.wants_amount = lambda: True
         app.amount_runs = []
-        app.run_amount = lambda img, h, title=None: app.amount_runs.append((h, title))
+        app.run_amount = lambda img, h, title=None, origin=None: app.amount_runs.append((h, title, origin))
         d, _ = self.detector(Script(H1, H1, H1, title='zigzag.kr/checkout/order-sheets/a1b2c3d4e5'), app)
         self.assertEqual([d.tick(), d.tick(), d.tick()], ['changing', 'amount', 'same'])
-        self.assertEqual(app.amount_runs, [(H1, 'zigzag.kr/checkout/order-sheets/a1b2c3d4e5')])
+        self.assertEqual(app.amount_runs, [(H1, 'zigzag.kr/checkout/order-sheets/a1b2c3d4e5', (0, 0))])
         self.assertEqual(app.runs, [])
         app.wants_amount = lambda: False                 # 결정했거나 금액을 채우면 다시 쉰다
         self.assertEqual(d.tick(), 'paused')
@@ -619,6 +619,18 @@ class TestHandleAuto(TkCase):
         self.close_window(app)
         self.assertIsNone(app.pending)
         self.assertFalse(app.wants_amount())
+
+    def test_pending_popup_mask_uses_capture_origin(self):
+        """맨 앞 창만 캡처했으면 그 창의 왼쪽 위(origin) 기준으로 팝업 영역을 지운다"""
+        app = self.pending_app()
+        seen = []
+        app.analyze_frame = lambda img: seen.append(img) or dataclasses.replace(self.checkout)
+        x0, y0, x1, y1 = app.window.screen_rect
+        origin = (x0 - 10, y0 - 10)                      # 창이 팝업보다 조금 왼쪽 위에서 시작
+        app.run_amount(np.zeros((y1 - y0 + 40, x1 - x0 + 40, 3), np.uint8), H2, None, origin)
+        self.assertTrue((seen[0][10:10 + y1 - y0, 10:10 + x1 - x0] == 255).all())
+        self.assertEqual(int(seen[0][:10].sum()), 0)
+        self.close_window(app)
 
     def test_mask_rect(self):
         img = np.zeros((100, 200, 3), np.uint8)
