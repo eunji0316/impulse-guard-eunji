@@ -750,6 +750,32 @@ class TestHandleAuto(TkCase):
         self.assertEqual(t.info['회차'], 2)
         self.assertIn('회차 2', self.log_lines(timing_lines=True)[-1])
 
+    def test_covered_popup_logged_when_amount_not_read(self):
+        """팝업이 캡처 영역에 겹치면 그 부분은 지우고 읽는다. 금액을 못 읽었으면 팝업이 가린 영역을 로그에 남긴다"""
+        app = self.pending_app()
+        app.analyze_frame = lambda img: dataclasses.replace(self.no_amount())
+        x0, y0, x1, y1 = app.window.screen_rect
+        origin = (x0 - 100, y0 - 100)                    # 브라우저 창이 팝업을 덮는 위치
+        self.assertFalse(app.run_amount(np.zeros((y1 - y0 + 200, x1 - x0 + 200, 3), np.uint8), H2, None, origin))
+        line = [l for l in self.log_lines() if 'amount |' in l][-1]
+        self.assertIn('금액 못 읽음 (결제 화면) | 팝업이 캡처 영역의', line)
+        self.assertIn(f'({x1 - x0}x{y1 - y0}, 이미지 기준 100,100)', line)
+        self.close_window(app)
+
+    def test_not_covered_no_info_log(self):
+        """팝업이 캡처 영역 밖(브라우저 옆)이면 가림 로그를 남기지 않는다"""
+        app = self.pending_app()
+        app.analyze_frame = lambda img: dataclasses.replace(self.no_amount())
+        x0, y0, x1, y1 = app.window.screen_rect
+        self.assertFalse(app.run_amount(np.zeros((300, 300, 3), np.uint8), H2, None, (x0 - 1000, y0)))
+        self.assertFalse([l for l in self.log_lines() if 'amount |' in l])
+        self.close_window(app)
+
+    def test_covered_box(self):
+        self.assertEqual(main.covered_box((150, 40, 400, 60), (100, 0), (100, 200)), (50, 40, 200, 60))
+        self.assertIsNone(main.covered_box((500, 40, 600, 60), (100, 0), (100, 200)))
+        self.assertIsNone(main.covered_box(None, (0, 0), (100, 200)))
+
     def test_mask_rect(self):
         img = np.zeros((100, 200, 3), np.uint8)
         main.mask_rect(img, (150, 40, 400, 60), origin=(100, 0))     # 화면 좌표 → 이미지 좌표, 밖으로 나간 곳은 자름

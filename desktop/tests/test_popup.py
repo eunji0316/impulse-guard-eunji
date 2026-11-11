@@ -277,9 +277,22 @@ class TestImpulsePopup(TkCase):
         self.assertEqual(p.hold_btn['bg'], config.POPUP_COLORS['primary'])
         self.assertEqual(p.giveup_btn['bg'], config.POPUP_COLORS['secondary'])
         self.assertEqual(tk.font.Font(font=p.buy_link['font']).actual('underline'), 1)
-        self.assertLessEqual(p.win.winfo_y(), self.host.px(config.POPUP_TOP_MARGIN) + 40)    # 화면 위쪽
+        left, top, right, bottom = popup.work_area(p.win)                  # 작업 영역 오른쪽 아래
+        self.root.update()
+        self.assertGreaterEqual(p.win.winfo_rootx() + p.win.winfo_width(), right - self.host.px(80))
+        self.assertLessEqual(p.win.winfo_rooty() + p.win.winfo_height(), bottom)
+        self.assertGreaterEqual(p.win.winfo_rooty() + p.win.winfo_height(), bottom - self.host.px(120))
         p.destroy()
 
+
+    def test_blocked_notice_bottom_right(self):
+        """차단 안내 창도 같은 오른쪽 아래"""
+        w = popup.BlockedNotice(self.host, BlockedView(90, '겨울 패딩'), take_focus=False)
+        self.root.update()
+        left, top, right, bottom = popup.work_area(w.win)
+        self.assertGreaterEqual(w.win.winfo_rootx() + w.win.winfo_width(), right - self.host.px(80))
+        self.assertLessEqual(w.win.winfo_rooty() + w.win.winfo_height(), bottom)
+        w.destroy()
     def test_hold_shows_result(self):
         out = Outcome('타임머신에 담았어요', '2026-11-12 08:30까지 참으면 +992P를 받아요.', show_link=True)
         p, act = self.open(actions=FakeActions(delay=0.2, hold=out))

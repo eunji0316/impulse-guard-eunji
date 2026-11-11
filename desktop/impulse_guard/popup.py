@@ -123,8 +123,24 @@ class UiHost:
         self.root.after_cancel(self._after)
 
 
+def work_area(win=None):
+    """주 모니터 작업 영역 (left, top, right, bottom). 작업 표시줄을 뺀 영역. 못 구하면 화면 전체"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        rect = wintypes.RECT()
+        SPI_GETWORKAREA = 0x0030
+        if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0):
+            return rect.left, rect.top, rect.right, rect.bottom
+    except Exception:
+        pass
+    if win is not None:
+        return 0, 0, win.winfo_screenwidth(), win.winfo_screenheight()
+    return 0, 0, 1920, 1080
+
+
 class _Window:
-    """두 창의 공통: 항상 위, 주 모니터 위쪽 가운데, 흰 카드"""
+    """두 창의 공통: 항상 위, 주 모니터 오른쪽 아래, 흰 카드"""
 
     title = '충동구매 방지'
 
@@ -214,12 +230,19 @@ class _Window:
         lb.pack(fill='x', pady=(self.host.px(12), 0))
         return lb
 
+    def position(self, h):
+        """창 왼쪽 위 좌표: 주 모니터 작업 영역(작업 표시줄 제외)의 오른쪽 아래"""
+        left, top, right, bottom = work_area(self.win)
+        m, bar = self.host.px(config.POPUP_EDGE_MARGIN), self.host.px(config.POPUP_TITLEBAR)
+        x = max(left, right - self.width - m)
+        y = max(top, bottom - h - bar - m)
+        return x, y
+
     def place(self):
-        """주 모니터 위쪽 가운데에 놓고 앞으로 가져온다. 내용이 바뀌면 다시 부른다"""
+        """주 모니터 오른쪽 아래에 놓고 앞으로 가져온다. 내용이 바뀌면 다시 부른다"""
         self.win.update_idletasks()
         h = self.win.winfo_reqheight()
-        x = (self.win.winfo_screenwidth() - self.width) // 2
-        y = self.host.px(config.POPUP_TOP_MARGIN)
+        x, y = self.position(h)
         self.win.geometry(f'{self.width}x{h}+{x}+{y}')
         self.win.deiconify()
         self.win.lift()
@@ -234,9 +257,11 @@ class _Window:
             pass
 
     def resize(self):
-        """내용이 바뀐 뒤 높이만 맞춘다 (위치, 포커스는 그대로)"""
+        """내용이 바뀐 뒤 높이를 맞춘다. 아래쪽 끝은 그대로 두고 위로 늘어난다 (포커스는 그대로)"""
         self.win.update_idletasks()
-        self.win.geometry(f'{self.width}x{self.win.winfo_reqheight()}')
+        h = self.win.winfo_reqheight()
+        x, y = self.position(h)
+        self.win.geometry(f'{self.width}x{h}+{x}+{y}')
         self._remember_rect()
 
     def _remember_rect(self):
@@ -245,7 +270,7 @@ class _Window:
             self.win.update_idletasks()
             m = self.host.px(config.POPUP_MASK_MARGIN)
             x, y = self.win.winfo_rootx(), self.win.winfo_rooty()
-            self.screen_rect = (x - m, y - m - self.host.px(40), x + self.win.winfo_width() + m,
+            self.screen_rect = (x - m, y - m - self.host.px(config.POPUP_TITLEBAR), x + self.win.winfo_width() + m,
                                 y + self.win.winfo_height() + m)
         except tk.TclError:
             pass

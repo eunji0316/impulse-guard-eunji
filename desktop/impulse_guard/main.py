@@ -93,15 +93,22 @@ class PendingAmount:
     site: str = ''
 
 
-def mask_rect(img, rect, origin=(0, 0)):
-    """화면 좌표 rect(x0, y0, x1, y1) 영역을 흰색으로 지운다 (팝업 자기 글자를 읽지 않게). img를 바로 고친다"""
+def covered_box(rect, origin, shape):
+    """화면 좌표 rect가 캡처 이미지(왼쪽 위 origin, 크기 shape)에서 차지하는 영역 (x0, y0, x1, y1). 안 겹치면 None"""
     if not rect:
-        return img
+        return None
     ox, oy = origin
-    h, w = img.shape[:2]
+    h, w = shape[:2]
     x0, y0 = max(0, int(rect[0] - ox)), max(0, int(rect[1] - oy))
     x1, y1 = min(w, int(rect[2] - ox)), min(h, int(rect[3] - oy))
-    if x0 < x1 and y0 < y1:
+    return (x0, y0, x1, y1) if x0 < x1 and y0 < y1 else None
+
+
+def mask_rect(img, rect, origin=(0, 0)):
+    """화면 좌표 rect(x0, y0, x1, y1) 영역을 흰색으로 지운다 (팝업 자기 글자를 읽지 않게). img를 바로 고친다"""
+    box = covered_box(rect, origin, img.shape)
+    if box:
+        x0, y0, x1, y1 = box
         img[y0:y1, x0:x1] = 255
     return img
 
@@ -378,12 +385,21 @@ class App:
             return False
         seq = self._next_round()
         try:
-            mask_rect(img, p.window.screen_rect, origin if origin is not None else capture.monitor_origin())
+            origin = origin if origin is not None else capture.monitor_origin()
+            box = covered_box(p.window.screen_rect, origin, img.shape)
+            mask_rect(img, p.window.screen_rect, origin)
             a, ocr_sec = timed_analysis(self.analyze_frame, img)
             a.title_key = title_key(title)
             site = a.page.site if a.page else ''
             if not a.is_checkout or not a.amount:
-                self.log.debug(f'amount 팝업이 떠 있는 동안 금액 못 읽음 ({a.stage.label if a.stage else "-"})')
+                stage = a.stage.label if a.stage else '-'
+                if box:
+                    # 팝업이 브라우저 위에 겹친 부분은 지우고 읽었다: 결제 금액이 그 아래 있었으면 못 읽는다
+                    pct = (box[2] - box[0]) * (box[3] - box[1]) * 100 // max(1, img.shape[0] * img.shape[1])
+                    self.log.info(f'amount | 금액 못 읽음 ({stage}) | 팝업이 캡처 영역의 {pct}%를 가림 '
+                                  f'({box[2] - box[0]}x{box[3] - box[1]}, 이미지 기준 {box[0]},{box[1]})', console=False)
+                else:
+                    self.log.debug(f'amount 팝업이 떠 있는 동안 금액 못 읽음 ({stage})')
                 return False
             if not self.orders.fill(p.order, site, a.amount, frame_hash, a.title_key):
                 self.log.event('auto', a, dup='other', ocr_sec=ocr_sec, note='팝업의 주문과 다른 주문이라 채우지 않음')
