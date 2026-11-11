@@ -15,6 +15,12 @@ NO_PRICE_TEXT = '가격을 읽지 못했어요'
 NO_NAME_TEXT = '상품명을 읽지 못했어요'
 NO_NAME_API = '상품명을 읽지 못한 상품'      # 쿨다운에는 상품명이 꼭 필요해서 대신 보내는 이름
 NO_PRICE_REASON = '가격을 읽지 못해 큰 금액인지 확인할 수 없어요. 한 번 더 생각해 볼까요?'
+# 결제 화면인데 결제 금액을 아직 못 읽었을 때 (B-5). 팝업이 떠 있는 동안 화면에서 총 결제금액을 읽으면 채운다 (fill_price)
+CHECKOUT_PENDING_TEXT = '결제 금액 확인 중…'
+CHECKOUT_PENDING_REASON = '화면에 총 결제금액이 보이면 금액을 채워 드려요.'
+CHECKOUT_PENDING_POINT = '금액을 확인하면 담아두기와 포인트를 쓸 수 있어요.'
+# 나중에 채운 금액: 서버 check는 금액 0으로 계산했으므로 포인트 숫자는 보이지 않는다 (버튼을 누르면 서버가 금액으로 계산)
+FILLED_POINT_TEXT = '안 사면 포인트를 받아요 · 24시간 참으면 더 받아요'
 # 결제 화면인데 서버가 checkout 이유를 주지 않을 때(예전 서버)만 쓰는 문구. 평소 문구는 서버(ipp_reason_text)가 정한다
 CHECKOUT_FALLBACK_REASON = '결제 직전이에요. 정말 지금 필요한 물건인지 한 번만 더 생각해 봐요.'
 
@@ -42,6 +48,7 @@ class ImpulseView:
     title: str = TITLES[None][0]
     subtitle: str = TITLES[None][1]
     is_checkout: bool = False
+    pending: bool = False        # 결제 금액 확인 중 (결제 화면인데 금액을 아직 못 읽음)
 
 
 @dataclass
@@ -95,7 +102,10 @@ def build(analysis, result, block_remain=0):
     if analysis.is_checkout and 'checkout' not in codes:
         reasons.insert(0, CHECKOUT_FALLBACK_REASON)  # 예전 서버: 결제 화면은 그래도 항상 팝업
         codes.insert(0, 'checkout')
-    if price <= 0:
+    pending = analysis.is_checkout and price <= 0
+    if pending:
+        reasons.append(CHECKOUT_PENDING_REASON)
+    elif price <= 0:
         reasons.append(NO_PRICE_REASON)
     elif not d.get('is_impulse') and not analysis.is_checkout:
         return None
@@ -103,20 +113,33 @@ def build(analysis, result, block_remain=0):
 
     v = ImpulseView(
         item_name=name or NO_NAME_TEXT, api_name=name or NO_NAME_API,
-        price=price, price_text=won(price) if price else NO_PRICE_TEXT,
+        price=price, price_text=won(price) if price else (CHECKOUT_PENDING_TEXT if pending else NO_PRICE_TEXT),
         reasons=reasons[:config.POPUP_MAX_REASONS],
         point=int(d.get('point') or 0), point2=int(d.get('point2') or 0),
         can_hold=price > 0, bl_id=int(d.get('bl_id') or 0),
-        title=title, subtitle=subtitle, is_checkout=analysis.is_checkout)
+        title=title, subtitle=subtitle, is_checkout=analysis.is_checkout, pending=pending)
     if product and price and p.original_price and p.original_price > price:
         v.orig_text = won(p.original_price)
     if product and price and p.discount_rate:
         v.rate_text = f'{p.discount_rate}%'
     if price:
         v.point_text = f'안 사면 +{v.point:,}P · 24시간 참으면 +{v.point2:,}P'
+    elif pending:
+        v.point_text = CHECKOUT_PENDING_POINT
     else:
         v.point_text = '가격을 읽지 못해 담아두기와 포인트를 쓸 수 없어요.'
     return 'impulse', v
+
+
+def fill_price(view, price):
+    """결제 금액 확인 중이던 팝업에 나중에 읽은 금액을 채운다. 채웠으면 True
+    담아두기/안 살래요는 view.price를 서버에 보내므로 채운 금액으로 쿨다운과 포인트가 계산된다"""
+    if not view.pending or price <= 0:
+        return False
+    view.price, view.price_text, view.can_hold, view.pending = int(price), won(price), True, False
+    view.reasons = [r for r in view.reasons if r != CHECKOUT_PENDING_REASON]
+    view.point_text = FILLED_POINT_TEXT
+    return True
 
 
 @dataclass

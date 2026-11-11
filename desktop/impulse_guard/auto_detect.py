@@ -11,9 +11,12 @@ F4 없이 interval_sec마다 화면을 확인한다. OCR(CPU 약 9초)은 비싸
        AUTO_SETTLE_SEC(1초) 뒤 다시 본다. 멈췄으면 OCR → app.run_auto(이미지, 해시)
        F4가 방금 분석한 화면(app.last_frame_hash)도 같은 화면으로 본다
 
+결제 금액 확인 중 팝업 (B-5): 결제 화면인데 금액을 못 읽고 팝업을 띄웠으면(app.wants_amount()) 쉬지 않고
+같은 순서로 화면을 보다가 멈추면 app.run_amount(팝업 영역을 지우고 OCR → 금액을 읽으면 팝업과 주문 기록에 채움)를 부른다.
+
 제목으로 빨리 확인 (B-5): 기다리는 동안 AUTO_TITLE_POLL_SEC마다 맨 앞 창 제목만 확인한다(캡처 없음).
 제목이 결제 페이지(stage.is_checkout_title)로 바뀌면 interval_sec를 다 기다리지 않고 바로 확인하고,
-제목이 결제 페이지인 동안은 멈춤 확인 간격을 AUTO_FAST_SETTLE_SEC로 줄인다. 판정은 그대로 OCR로 한다.
+제목이 결제 페이지인 동안은 확인 간격을 AUTO_CHECKOUT_INTERVAL_SEC, 멈춤 확인 간격을 AUTO_FAST_SETTLE_SEC로 줄인다. 판정은 그대로 OCR로 한다.
 
 시간 측정 (B-5, timing.py): 화면이 바뀐 것을 처음 본 회차(change_at)와 그 앞 회차 사이 간격, 멈출 때까지 기다린 시간,
 분석한 회차의 캡처/해시 시간을 Timing에 담아 run_auto를 부른다. OCR과 서버 시간은 그 안에서 더해진다.
@@ -26,8 +29,8 @@ import threading
 from . import capture, config, frame, timing
 from .detector import stage
 
-SKIP_PAUSED, SKIP_OWN_CONSOLE, SKIP_EXCLUDED, SKIP_SAME, SKIP_CHANGING, SKIP_BUSY, ANALYZED = (
-    'paused', 'own-console', 'excluded', 'same', 'changing', 'busy', 'analyzed')
+SKIP_PAUSED, SKIP_OWN_CONSOLE, SKIP_EXCLUDED, SKIP_SAME, SKIP_CHANGING, SKIP_BUSY, ANALYZED, AMOUNT = (
+    'paused', 'own-console', 'excluded', 'same', 'changing', 'busy', 'analyzed', 'amount')
 
 
 class AutoDetector(threading.Thread):
@@ -60,6 +63,8 @@ class AutoDetector(threading.Thread):
         if self.last_result == SKIP_CHANGING:
             settle = config.AUTO_FAST_SETTLE_SEC if self.checkout_title else config.AUTO_SETTLE_SEC
             return min(settle, self.interval)
+        if self.checkout_title:
+            return min(config.AUTO_CHECKOUT_INTERVAL_SEC, self.interval)
         return self.interval
 
     def _see_title(self, title):
@@ -138,10 +143,13 @@ class AutoDetector(threading.Thread):
         self.changing = 0
 
     def _tick(self):
+        amount_mode = False
         if self.app.paused():
-            self.prev = None
-            self._forget_change()
-            return SKIP_PAUSED
+            if not getattr(self.app, 'wants_amount', lambda: False)():
+                self.prev = None
+                self._forget_change()
+                return SKIP_PAUSED
+            amount_mode = True                  # 결제 금액 확인 중 팝업: 금액만 읽는다
         t0 = timing.now()
         fr = self.grab()
         self.grab_sec = timing.now() - t0
@@ -170,20 +178,29 @@ class AutoDetector(threading.Thread):
             self.changing += 1
             return SKIP_CHANGING
         self.prev = h
+        if amount_mode:
+            self.last_analyzed = h
+            img, fr.img = fr.img, None
+            t = self._timing(img, 'amount')
+            with timing.active(t):
+                self.app.run_amount(img, h, fr.foreground_title)
+            del img
+            return AMOUNT
         if not self.app.try_begin():
             return SKIP_BUSY
         self.last_analyzed = h
         img, fr.img = fr.img, None
         t = self._timing(img)
         with timing.active(t):
-            self.app.run_auto(img, h)   # 분석이 끝나면 app이 잠금을 푼다 (창을 띄우면 창이 닫힐 때)
+            # 분석이 끝나면 app이 잠금을 푼다 (창을 띄우면 창이 닫힐 때). 제목은 app이 해시로만 바꿔 같은 주문 판단에 쓴다
+            self.app.run_auto(img, h, fr.foreground_title)
         del img
         return ANALYZED
 
-    def _timing(self, img):
+    def _timing(self, img, source='auto'):
         """분석할 회차의 측정 객체: 기다린 시간과 이 회차의 캡처/해시 시간"""
         self._saw_change()
-        t = timing.Timing('auto')
+        t = timing.Timing(source)
         t.detected_at = self.change_at
         if self.change_gap is not None:
             t.add('interval_wait', self.change_gap)

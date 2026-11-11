@@ -141,6 +141,7 @@ SETTING_CACHE_SEC = 60               # 회원 설정(차단 시간, 키워드) �
 POPUP_MAX_REASONS = 2                # 팝업에 보여 줄 이유 개수
 POPUP_TOP_MARGIN = 48                # 주 모니터 위쪽에서 창까지 거리 (px)
 POPUP_WIDTH = 420                    # 창 너비 (px, 높이는 내용에 맞춤)
+POPUP_MASK_MARGIN = 24              # 팝업이 떠 있는 동안 금액을 읽을 때 팝업 영역 둘레로 더 지우는 여유 (px, 화면 배율 곱함)
 POPUP_UI_POLL_MS = 100               # 다른 스레드가 보낸 화면 작업을 확인하는 간격
 POPUP_INPUT_GUARD_SEC = 0.7          # 창이 뜬 뒤 이 시간 동안 버튼 입력 무시 (하던 클릭/키 입력이 버튼에 들어가지 않게)
 POPUP_KEEP_TOP_MS = 2000             # 창이 떠 있는 동안 맨 위로 다시 올리는 간격
@@ -192,7 +193,12 @@ CHECKOUT_TITLE_WORDS = ['결제', '주문서', '주문하기', '구매하기', '
                         'order-sheet', 'ordersheet', 'order-form', 'orderform', '/order']   # 대소문자 무시
 AUTO_TITLE_POLL_SEC = 0.2        # 기다리는 동안 맨 앞 창 제목을 확인하는 간격. 결제 페이지 제목으로 바뀌면 바로 확인
 AUTO_FAST_SETTLE_SEC = 0.5       # 제목이 결제 페이지일 때 멈춤 확인 간격 (AUTO_SETTLE_SEC 대신)
-ORDER_SAME_DISTANCE = 20         # 결제 금액을 못 읽었을 때, 이 이하로 다르면 같은 주문
+AUTO_CHECKOUT_INTERVAL_SEC = 1.0 # 제목이 결제 페이지인 동안의 확인 간격 (interval_sec 대신). 결제 페이지 안에서 스크롤하면 빨리 본다
+# 결제 금액을 못 읽었을 때 화면 해시가 이 이하로 다르면 같은 주문 (B-5: 20 → 6, 같은 화면 수준).
+# 실제 로그: 지그재그 결제 페이지 맨 위(금액이 안 보임)는 장바구니가 달라도 비슷해서 20이면 다른 주문을 같은 주문으로 봤다
+ORDER_SAME_DISTANCE = 6
+# 탭 제목에 이 모양(숫자가 3개 이상 든 8자 이상 영문/숫자 덩어리)이 있으면 주문서 번호처럼 주문마다 다른 제목으로 본다
+ORDER_TITLE_ID_RE = r'(?=[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{8,}'
 CHECKOUT_NAME_MINUTES = 30       # 결제 화면의 상품명: 같은 쇼핑몰에서 이 시간 안에 본 마지막 상품 이름을 쓴다
 CONSOLE_TITLE = 'impulse-guard 감지 프로그램'   # 콘솔 창 제목. 맨 앞 창이 이 제목이면 자동 감지를 건너뛴다
 # 로그 (desktop 폴더 기준, Git에 올리지 않음). 캡처 이미지는 어디에도 저장하지 않는다

@@ -15,13 +15,17 @@ import shutil
 import tempfile
 import threading
 import time
+import dataclasses
 import unittest
 from unittest import mock
+
+import numpy as np
 
 import cache
 import checkout_samples as cs
 from impulse_guard import auto_detect, config, main, popup, popup_model, server_client, timing
 from impulse_guard.capture import Frame
+from impulse_guard.dedup import title_key
 from impulse_guard.detect_log import DetectLog, mask_private
 from test_popup import TkCase
 from test_server_client import FakeServer, make
@@ -52,6 +56,7 @@ class FakeApp:
         self.same = 0
         self.runs = []
         self.timings = []
+        self.titles = []
         self.run_delay = 0.0
 
     def paused(self):
@@ -63,8 +68,9 @@ class FakeApp:
     def still_same(self):
         self.same += 1
 
-    def run_auto(self, img, h):
+    def run_auto(self, img, h, title=None):
         self.runs.append(h)
+        self.titles.append(title)
         self.timings.append(timing.current())
         time.sleep(self.run_delay)
 
@@ -164,6 +170,29 @@ class TestAutoDetectorTick(unittest.TestCase):
         d = self.wait_detector(['상품 상세 - 지그재그'])
         d._stop_event.set()
         self.assertTrue(d.wait(5))
+
+    def test_checkout_title_shortens_interval(self):
+        """제목이 결제 페이지인 동안은 확인 간격도 짧게 (결제 페이지 안 스크롤을 빨리 본다)"""
+        d, _ = self.detector(Script(H1, H1, H1, title='zigzag.kr/checkout/order-sheets/a1b2c3d4e5'))
+        self.assertEqual([d.tick(), d.tick(), d.tick()], ['changing', 'analyzed', 'same'])
+        self.assertEqual(d.next_wait(), config.AUTO_CHECKOUT_INTERVAL_SEC)
+        d2, _ = self.detector(Script(H1, H1, H1, title='뉴스'))
+        [d2.tick() for _ in range(3)]
+        self.assertEqual(d2.next_wait(), 3)
+
+    def test_amount_mode_while_pending_popup(self):
+        """'결제 금액 확인 중' 팝업이 떠 있으면 쉬지 않고, 화면이 멈추면 run_amount (잠금은 잡지 않음)"""
+        app = FakeApp()
+        app.is_paused = True
+        app.wants_amount = lambda: True
+        app.amount_runs = []
+        app.run_amount = lambda img, h, title=None: app.amount_runs.append((h, title))
+        d, _ = self.detector(Script(H1, H1, H1, title='zigzag.kr/checkout/order-sheets/a1b2c3d4e5'), app)
+        self.assertEqual([d.tick(), d.tick(), d.tick()], ['changing', 'amount', 'same'])
+        self.assertEqual(app.amount_runs, [(H1, 'zigzag.kr/checkout/order-sheets/a1b2c3d4e5')])
+        self.assertEqual(app.runs, [])
+        app.wants_amount = lambda: False                 # 결정했거나 금액을 채우면 다시 쉰다
+        self.assertEqual(d.tick(), 'paused')
 
     def test_new_screen_after_analysis(self):
         d, app = self.detector(Script(H1, H1, H2, H2))
@@ -534,6 +563,69 @@ class TestHandleAuto(TkCase):
         with quiet():
             app.run_auto(object(), H1)
         self.assertFalse(app.paused())
+
+    # ── 결제 금액 확인 중 팝업 (B-5) ──
+    def no_amount(self):
+        a = self.checkout
+        return dataclasses.replace(a, page=dataclasses.replace(a.page, checkout_total=None, total_label=''))
+
+    def pending_app(self):
+        app = self.make_app(check=(200, CHECKOUT_RESULT))
+        a = self.no_amount()
+        self.assertEqual(a.amount, 0)
+        self.assertTrue(self.handle(app, a, H1))
+        self.assertTrue(app.window.view.pending)
+        self.assertEqual(app.window.price_label['text'], popup_model.CHECKOUT_PENDING_TEXT)
+        self.assertEqual(str(app.window.hold_btn['state']), 'disabled')
+        self.assertTrue(app.wants_amount())
+        return app
+
+    def test_pending_popup_filled_when_amount_read(self):
+        """금액을 못 읽은 결제 화면도 팝업('결제 금액 확인 중'), 떠 있는 동안 금액을 읽으면 팝업과 주문 기록에 채운다"""
+        app = self.pending_app()
+        seen = []
+        app.analyze_frame = lambda img: seen.append(img) or dataclasses.replace(self.checkout)
+        img = np.zeros((900, 1600, 3), np.uint8)
+        with mock.patch.object(main.capture, 'monitor_origin', return_value=(0, 0)):
+            self.assertTrue(app.run_amount(img, H2, None))
+        self.assertTrue(self.pump(lambda: app.window.view.price == 49600))
+        w = app.window
+        self.assertEqual(w.price_label['text'], '49,600원')
+        self.assertEqual(str(w.hold_btn['state']), 'normal')
+        self.assertNotIn(popup_model.CHECKOUT_PENDING_REASON, [lb.reason for lb in w.reason_labels])
+        self.assertEqual(app.orders.orders[0].amount, 49600)
+        self.assertFalse(app.wants_amount())
+        x0, y0, x1, y1 = w.screen_rect                   # 팝업 영역은 지우고 OCR (팝업 자기 글자를 읽지 않게)
+        cy, cx = min((y0 + y1) // 2, 899), min((x0 + x1) // 2, 1599)
+        self.assertTrue((seen[0][cy, cx] == 255).all())
+        self.assertIn('팝업 금액 채움', self.log_lines()[-1])
+        self.close_window(app)
+
+    def test_pending_popup_not_filled_by_other_order(self):
+        """팝업이 떠 있는 동안 다른 주문서(탭 제목이 다름)로 가서 읽은 금액은 채우지 않는다"""
+        app = self.pending_app()
+        app.pending.order.title = title_key('zigzag.kr/checkout/order-sheets/a1b2c3d4e5')
+        app.analyze_frame = lambda img: dataclasses.replace(self.checkout)
+        with mock.patch.object(main.capture, 'monitor_origin', return_value=(0, 0)):
+            self.assertFalse(app.run_amount(np.zeros((900, 1600, 3), np.uint8), H2,
+                                            'zigzag.kr/checkout/order-sheets/f6e7d8c9b0'))
+        self.assertTrue(app.window.view.pending)
+        self.assertEqual(app.orders.orders[0].amount, 0)
+        self.assertIn('다른 주문이라 채우지 않음', self.log_lines()[-1])
+        self.close_window(app)
+
+    def test_pending_cleared_on_close(self):
+        app = self.pending_app()
+        self.close_window(app)
+        self.assertIsNone(app.pending)
+        self.assertFalse(app.wants_amount())
+
+    def test_mask_rect(self):
+        img = np.zeros((100, 200, 3), np.uint8)
+        main.mask_rect(img, (150, 40, 400, 60), origin=(100, 0))     # 화면 좌표 → 이미지 좌표, 밖으로 나간 곳은 자름
+        self.assertTrue((img[40:60, 50:200] == 255).all())
+        self.assertEqual(int(img[:40].sum()) + int(img[60:].sum()) + int(img[40:60, :50].sum()), 0)
+        self.assertIs(main.mask_rect(img, None), img)
 
     # ── 시간 측정 (B-5) ──
     def run_timed(self, app, t):

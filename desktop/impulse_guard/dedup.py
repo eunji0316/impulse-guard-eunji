@@ -2,8 +2,12 @@
 
 1. 같은 화면: 자동 감지 루프가 직전에 분석한 화면의 해시와 비교해 OCR을 건너뛴다 (auto_detect.py)
 2. 같은 주문 (RecentOrders): 결제 화면에서 기록과 팝업을 한 번만 한다
-   - 쇼핑몰 + 결제 금액이 같으면 같은 주문
-   - 금액을 못 읽었으면 화면 해시 거리가 config.ORDER_SAME_DISTANCE 이하일 때 같은 주문
+   - 쇼핑몰이 다르거나 탭 제목이 다르면 다른 주문 (B-5. 지그재그는 제목이 주문서 주소라 주문마다 다르다)
+     제목 원문은 기억하지 않고 해시(title_key)만 메모리에서 비교한다. 로그와 파일에도 남기지 않는다
+   - 금액을 둘 다 읽었으면 금액이 같아야 같은 주문
+   - 금액을 한쪽이라도 모르면: 결제 화면에 계속 머무는 중(스크롤해서 맨 위 → 총 결제금액)이거나,
+     제목에 주문서 번호가 있고 같거나, 화면 해시 거리가 config.ORDER_SAME_DISTANCE 이하일 때 같은 주문
+   - 처음에 금액을 못 읽었다가 나중에 읽으면 같은 주문에 채운다 (Verdict.filled)
    - 기준 시간은 '마지막으로 본 시각'부터 same_order_minutes (sliding window)
      · 결제 화면에 계속 머무르면 볼 때마다 시각이 갱신되어 다시 뜨지 않는다
      · 다른 창에 갔다가 기준 시간 안에 돌아오면 같은 시도로 본다 (revisit으로 기록만)
@@ -13,10 +17,28 @@
 
 기억은 프로그램이 켜져 있는 동안 메모리에만 둔다. 화면 이미지는 기억하지 않고 해시만 둔다.
 """
+import hashlib
+import re
 import time
 from dataclasses import dataclass
 
 from . import config, frame
+
+
+@dataclass(frozen=True)
+class TitleKey:
+    """탭 제목의 해시. 제목 원문은 두지 않는다"""
+    digest: int
+    specific: bool               # 주문서 번호처럼 주문마다 다른 값이 들어 있는 제목
+
+
+def title_key(title):
+    """탭 제목 → TitleKey (제목이 없으면 None). 원문은 여기서 버린다"""
+    title = (title or '').strip().lower()
+    if not title:
+        return None
+    digest = int.from_bytes(hashlib.blake2b(title.encode('utf-8'), digest_size=8).digest(), 'big')
+    return TitleKey(digest, bool(re.search(config.ORDER_TITLE_ID_RE, title)))
 
 
 @dataclass
@@ -29,6 +51,7 @@ class SeenOrder:
     count: int = 1               # 본 횟수
     decision: str = ''           # 팝업 결정: hold, giveup, buy, close ('' = 아직)
     bl_id: int = 0
+    title: TitleKey = None       # 탭 제목 해시 (모르면 None)
 
     @property
     def key(self):
@@ -41,6 +64,7 @@ class Verdict:
     order: SeenOrder
     reason: str = 'new'          # new / same (계속 머무름) / revisit (다른 화면에 갔다 옴)
     away_sec: float = 0.0        # revisit이면 떠나 있던 시간
+    filled: bool = False         # 이번에 처음으로 금액을 읽어 같은 주문에 채웠다
 
 
 class RecentOrders:
@@ -56,30 +80,60 @@ class RecentOrders:
         if self.current is not None and self.current not in self.orders:
             self.current = None
 
-    def _same(self, o, site, amount, frame_hash):
+    def _same(self, o, site, amount, frame_hash, title):
+        if site and o.site and site != o.site:
+            return False
+        if title is not None and o.title is not None and title.digest != o.title.digest:
+            return False                          # 탭 제목이 다르면 다른 주문
         if amount and o.amount:
             return o.site == site and o.amount == amount
-        return (not site or not o.site or o.site == site) and frame.distance(o.frame_hash, frame_hash) <= self.hash_distance
+        # 금액을 한쪽이라도 모른다
+        if o is self.current:
+            return True                           # 결제 화면에 계속 머무는 중 (스크롤해서 금액이 보이게 됨)
+        if title is not None and o.title is not None and title.specific:
+            return True                           # 주문서 번호가 든 제목이 같다
+        return frame.distance(o.frame_hash, frame_hash) <= self.hash_distance
 
-    def see(self, site, amount, frame_hash):
-        """결제 화면을 봤다. 같은 주문이 있으면 중복(갱신), 없으면 새로 기억한다"""
+    def see(self, site, amount, frame_hash, title=None):
+        """결제 화면을 봤다. 같은 주문이 있으면 중복(갱신), 없으면 새로 기억한다. title: title_key()"""
         now = self.clock()
         self._expire(now)
         amount = int(amount or 0)
         for o in self.orders:
-            if self._same(o, site, amount, frame_hash):
+            if self._same(o, site, amount, frame_hash, title):
                 away = now - o.last_seen
                 reason = 'same' if o is self.current else 'revisit'
                 o.last_seen, o.count = now, o.count + 1
-                if amount and not o.amount:
+                filled = bool(amount and not o.amount)
+                if filled:
                     o.amount = amount            # 처음에 금액을 못 읽었으면 채운다
+                if title is not None:
+                    o.title = title
                 o.frame_hash = frame_hash
                 self.current = o
-                return Verdict(True, o, reason, away if reason == 'revisit' else 0.0)
-        o = SeenOrder(site, amount, frame_hash, now, now)
+                return Verdict(True, o, reason, away if reason == 'revisit' else 0.0, filled)
+        o = SeenOrder(site, amount, frame_hash, now, now, title=title)
         self.orders.append(o)
         self.current = o
         return Verdict(False, o)
+
+    def fill(self, order, site, amount, frame_hash, title=None):
+        """'결제 금액 확인 중' 팝업이 떠 있는 동안 읽은 금액을 그 주문에 채운다 (B-5). 같은 주문으로 볼 수 없으면 False
+        쇼핑몰이나 탭 제목이 다르면(사용자가 다른 주문서로 갔음) 채우지 않는다"""
+        amount = int(amount or 0)
+        if amount <= 0 or (site and order.site and site != order.site):
+            return False
+        if title is not None and order.title is not None and title.digest != order.title.digest:
+            return False
+        if order.amount and order.amount != amount:
+            return False
+        order.amount = amount
+        order.frame_hash = frame_hash
+        order.last_seen = self.clock()
+        if title is not None:
+            order.title = title
+        self.current = order
+        return True
 
     def still_here(self):
         """화면이 바뀌지 않아 OCR을 건너뛴 회차: 지금 주문을 계속 보고 있는 것으로 갱신"""

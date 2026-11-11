@@ -72,6 +72,23 @@ def set_console_title(title):
         pass
 
 
+_origin = None
+
+
+def monitor_origin():
+    """캡처하는 모니터의 왼쪽 위 화면 좌표 (팝업 영역을 이미지 좌표로 바꿀 때). 처음 한 번만 묻는다"""
+    global _origin
+    if _origin is None:
+        try:
+            import mss
+            with mss.mss() as sct:
+                m = sct.monitors[config.CAPTURE_MONITOR]
+                _origin = (m['left'], m['top'])
+        except Exception:
+            _origin = (0, 0)
+    return _origin
+
+
 def grab_screen():
     import mss
     with mss.mss() as sct:

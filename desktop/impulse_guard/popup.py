@@ -26,6 +26,7 @@ import webbrowser
 from tkinter import font as tkfont
 
 from . import config
+from . import popup_model
 from .popup_model import NO_PRICE_TEXT, Outcome, hms
 
 C = config.POPUP_COLORS
@@ -132,6 +133,7 @@ class _Window:
         self.on_closed = on_closed
         self.take_focus = take_focus
         self.closed = False
+        self.screen_rect = None                 # (x0, y0, x1, y1) 화면 좌표. place()가 정한다
         self.opened_at = time.monotonic()
         self._afters = {}                       # 이름 → after 예약 번호 (창을 닫을 때 모두 취소)
         self.width = host.px(config.POPUP_WIDTH)
@@ -222,11 +224,29 @@ class _Window:
         self.win.deiconify()
         self.win.lift()
         self.win.attributes('-topmost', True)
+        self._remember_rect()
         if not self.take_focus:
             self.flash()
             return
         try:
             self.win.focus_force()
+        except tk.TclError:
+            pass
+
+    def resize(self):
+        """내용이 바뀐 뒤 높이만 맞춘다 (위치, 포커스는 그대로)"""
+        self.win.update_idletasks()
+        self.win.geometry(f'{self.width}x{self.win.winfo_reqheight()}')
+        self._remember_rect()
+
+    def _remember_rect(self):
+        """main 스레드: 화면에서 창이 차지하는 영역 (제목 표시줄과 그림자 여유 포함). 자동 감지가 이 영역을 빼고 OCR한다"""
+        try:
+            self.win.update_idletasks()
+            m = self.host.px(config.POPUP_MASK_MARGIN)
+            x, y = self.win.winfo_rootx(), self.win.winfo_rooty()
+            self.screen_rect = (x - m, y - m - self.host.px(40), x + self.win.winfo_width() + m,
+                                y + self.win.winfo_height() + m)
         except tk.TclError:
             pass
 
@@ -279,7 +299,7 @@ class ImpulsePopup(_Window):
                 self.label(row, view.rate_text, 15, True, fg=C['danger'], bg=C['item']).pack(side='left', padx=(0, px(6)))
             self.price_label = self.label(row, view.price_text, 15, True, bg=C['item'])
         else:
-            self.price_label = self.label(row, NO_PRICE_TEXT, 12, True, fg=C['sub'], bg=C['item'])
+            self.price_label = self.label(row, view.price_text or NO_PRICE_TEXT, 12, True, fg=C['sub'], bg=C['item'])
         self.price_label.pack(side='left')
         if view.orig_text:
             self.label(row, view.orig_text, 10, fg=C['sub'], bg=C['item'],
@@ -289,6 +309,7 @@ class ImpulsePopup(_Window):
         for text in view.reasons:
             lb = self.label(self.ask, '• ' + text, 10, fg=C['danger'], wraplength=self.wrap)
             lb.pack(fill='x', pady=(px(10) if not self.reason_labels else px(2), 0))
+            lb.reason = text
             self.reason_labels.append(lb)
         self.point_label = self.label(self.ask, view.point_text, 10, True, fg=C['point'], wraplength=self.wrap)
         self.point_label.pack(fill='x', pady=(px(10), 0))
@@ -310,6 +331,20 @@ class ImpulsePopup(_Window):
         self.timemachine_link = None
 
         self.place()
+
+    # ── 결제 금액 채우기 (B-5) ──
+    def fill_price(self, price):
+        """main 스레드: '결제 금액 확인 중' 팝업에 읽은 금액을 채운다. 채웠으면 True"""
+        if self.closed or self.done or self.busy or not popup_model.fill_price(self.view, price):
+            return False
+        self.price_label.configure(text=self.view.price_text, font=self.host.font(15, True), fg=C['text'])
+        for lb in [lb for lb in self.reason_labels if getattr(lb, 'reason', '') == popup_model.CHECKOUT_PENDING_REASON]:
+            lb.destroy()
+            self.reason_labels.remove(lb)
+        self.point_label.configure(text=self.view.point_text)
+        self._set_busy(False)
+        self.resize()
+        return True
 
     # ── 버튼 ──
     def _set_busy(self, on):

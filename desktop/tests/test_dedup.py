@@ -9,7 +9,7 @@ import numpy as np
 
 import cache
 from impulse_guard import config, frame
-from impulse_guard.dedup import NoticeGate, RecentOrders
+from impulse_guard.dedup import NoticeGate, RecentOrders, title_key
 
 
 class Clock:
@@ -96,9 +96,67 @@ class TestRecentOrders(unittest.TestCase):
         self.assertFalse(self.orders.see('musinsa', 49600, H1).is_dup)
 
     def test_unknown_amount_uses_hash(self):
+        """금액을 모르고 다른 화면에 갔다 왔으면 화면 해시가 거의 같을 때만 같은 주문"""
         self.orders.see('coupang', 0, H1)
+        self.orders.left()
         self.assertTrue(self.orders.see('coupang', 0, H1_NEAR).is_dup)
+        self.orders.left()
         self.assertFalse(self.orders.see('coupang', 0, H_FAR).is_dup)
+
+    # ── B-5: 제목 해시, 머무는 중, 해시 기준 ──
+    def test_unknown_amount_mid_distance_is_new_after_leaving(self):
+        """실제 버그: 결제 페이지 맨 위(금액 모름)는 장바구니가 달라도 비슷하다 (B-4 기준 20 이하).
+        다른 화면에 갔다 온 뒤에는 같은 화면 수준(ORDER_SAME_DISTANCE)이 아니면 새 주문"""
+        self.orders.see('zigzag', 0, H1)
+        self.orders.left()
+        mid = H1 ^ ((1 << 15) - 1)                      # 15비트 차이
+        self.assertFalse(self.orders.see('zigzag', 0, mid).is_dup)
+
+    def test_scroll_on_same_page_fills_amount(self):
+        """결제 화면에 머무르며 맨 위(금액 모름) → 스크롤(총 결제금액): 화면이 많이 달라도 같은 주문, 금액을 채운다"""
+        self.orders.see('zigzag', 0, H1)
+        v = self.orders.see('zigzag', 85400, H_FAR)
+        self.assertTrue(v.is_dup)
+        self.assertTrue(v.filled)
+        self.assertEqual((v.reason, v.order.amount), ('same', 85400))
+        self.assertFalse(self.orders.see('zigzag', 85400, H_FAR).filled)    # 두 번째부터는 채운 것이 아님
+
+    def test_different_title_is_new_order(self):
+        """탭 제목(해시)이 다르면 금액이 같아도, 같은 화면이어도 다른 주문"""
+        a = title_key('zigzag.kr/checkout/order-sheets/a1b2c3d4e5')
+        b = title_key('zigzag.kr/checkout/order-sheets/f6e7d8c9b0')
+        self.orders.see('zigzag', 85400, H1, a)
+        self.assertFalse(self.orders.see('zigzag', 85400, H1, b).is_dup)
+        self.assertTrue(self.orders.see('zigzag', 85400, H1, a).is_dup)     # 같은 제목으로 돌아오면 같은 주문
+
+    def test_specific_title_matches_without_amount(self):
+        """주문서 번호가 든 제목이 같으면 금액을 모르고 화면이 달라도 같은 주문 (다른 화면에 갔다 와도)"""
+        a = title_key('zigzag.kr/checkout/order-sheets/a1b2c3d4e5')
+        self.orders.see('zigzag', 0, H1, a)
+        self.orders.left()
+        self.assertTrue(self.orders.see('zigzag', 0, H_FAR, a).is_dup)
+
+    def test_generic_title_needs_hash(self):
+        """주문마다 같은 제목(무신사 order-form)은 제목만으로 같은 주문이라 하지 않는다"""
+        a = title_key('musinsa.com/order/order-form')
+        self.assertFalse(a.specific)
+        self.orders.see('musinsa', 0, H1, a)
+        self.orders.left()
+        self.assertFalse(self.orders.see('musinsa', 0, H_FAR, a).is_dup)
+
+    def test_missing_title_is_ignored(self):
+        """제목을 모르는 쪽(F4 예전 기록, 제목 없는 창)은 제목 규칙을 쓰지 않는다"""
+        a = title_key('zigzag.kr/checkout/order-sheets/a1b2c3d4e5')
+        self.orders.see('zigzag', 85400, H1)
+        self.assertTrue(self.orders.see('zigzag', 85400, H1, a).is_dup)
+        self.assertIsNone(title_key('  '))
+
+    def test_title_key_keeps_no_text(self):
+        """제목 원문은 남지 않는다 (해시와 고유 값 여부만)"""
+        k = title_key('zigzag.kr/checkout/order-sheets/a1b2c3d4e5')
+        self.assertEqual(set(vars(k)), {'digest', 'specific'})
+        self.assertNotIn('a1b2c3d4e5', repr(k))
+        self.assertEqual(k, title_key('  ZIGZAG.kr/checkout/order-sheets/A1B2C3D4E5 '))
 
     def test_amount_filled_later(self):
         """처음엔 금액을 못 읽고 다음 회차에 읽으면 같은 화면이면 같은 주문으로 이어진다"""
