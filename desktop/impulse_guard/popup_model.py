@@ -64,7 +64,7 @@ def build(analysis, result, block_remain=0):
     analysis: main.Analysis, result: client.check()의 ApiResult (None이면 쇼핑 화면 아님)
     block_remain: 차단 중일 때 남은 초 (client.block_remain())
     """
-    if result is None or not result.ok or not analysis.shop.is_mall:
+    if result is None or not result.ok or not analysis.is_shopping:
         return None
     d = result.data
     p, info = analysis.prices, analysis.page
@@ -73,7 +73,8 @@ def build(analysis, result, block_remain=0):
     if d.get('is_blocking'):
         return 'blocked', BlockedView(int(block_remain or 0), name)
 
-    price = int((p.sale_price if p else 0) or 0)
+    price = int(analysis.amount or 0)
+    product = not analysis.is_checkout              # 결제 화면이면 원가/할인율은 보이지 않는다 (상품 하나의 값이 아님)
     reasons = reason_texts(d)
     if price <= 0:
         reasons.append(NO_PRICE_REASON)
@@ -86,9 +87,9 @@ def build(analysis, result, block_remain=0):
         reasons=reasons[:config.POPUP_MAX_REASONS],
         point=int(d.get('point') or 0), point2=int(d.get('point2') or 0),
         can_hold=price > 0, bl_id=int(d.get('bl_id') or 0))
-    if price and p.original_price and p.original_price > price:
+    if product and price and p.original_price and p.original_price > price:
         v.orig_text = won(p.original_price)
-    if price and p.discount_rate:
+    if product and price and p.discount_rate:
         v.rate_text = f'{p.discount_rate}%'
     if price:
         v.point_text = f'안 사면 +{v.point:,}P · 24시간 참으면 +{v.point2:,}P'

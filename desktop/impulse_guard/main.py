@@ -19,7 +19,7 @@ import threading
 from dataclasses import dataclass
 
 from . import capture, config, ocr, popup_model
-from .detector import page as page_info, price, shopping
+from .detector import page as page_info, price, shopping, stage as stage_mod
 from .popup_model import hms as _hms
 from .server_client import Client
 
@@ -30,17 +30,35 @@ class Analysis:
     prices: price.PriceResult = None
     page: page_info.PageInfo = None
     boxes: list = None
+    stage: stage_mod.StageResult = None
+
+    @property
+    def is_shopping(self):
+        """상품 화면이나 결제 화면 (stage가 없으면 원본 판정)"""
+        return self.stage.stage != stage_mod.NONE if self.stage else self.shop.is_mall
+
+    @property
+    def is_checkout(self):
+        return bool(self.stage and self.stage.stage == stage_mod.CHECKOUT)
+
+    @property
+    def amount(self):
+        """서버에 보낼 금액: 결제 화면이면 결제 금액(없으면 할인가), 상품 화면이면 할인가. 모르면 0"""
+        if self.is_checkout and self.page and self.page.checkout_total:
+            return self.page.checkout_total
+        return int((self.prices.sale_price if self.prices else 0) or 0)
 
 
 def analyze_boxes(boxes, img=None, reread=None, site_hints=None):
-    """OCR 상자로 쇼핑 판정, 가격 분석, 페이지 정보를 만든다 (테스트는 OCR 캐시로 부른다)"""
+    """OCR 상자로 쇼핑 판정, 화면 단계, 가격 분석, 페이지 정보를 만든다 (테스트는 OCR 캐시로 부른다)"""
     text = ocr.full_text(boxes)
     shop = shopping.judge(text)
-    if not shop.is_mall:
-        return Analysis(shop, boxes=boxes)
+    st = stage_mod.classify(text, shop.is_mall)
+    if st.stage == stage_mod.NONE:
+        return Analysis(shop, boxes=boxes, stage=st)
     prices = price.analyze(boxes, img, reread=reread)
-    info = page_info.analyze(boxes, text, prices, site_hints)
-    return Analysis(shop, prices, info, boxes)
+    info = page_info.analyze(boxes, text, prices, site_hints, st)
+    return Analysis(shop, prices, info, boxes, st)
 
 
 def analyze_image(img, site_hints=None):
@@ -55,8 +73,10 @@ def _won(v):
 def print_result(a):
     """원본과 같은 판정 출력 + 가격 분석"""
     print("-" * 40)
-    if a.shop.is_mall:
+    if a.is_shopping:
         print("⭕ [판정 결과] 쇼핑몰 사이트입니다!")
+        if a.stage is not None:
+            print(f"  - 화면 단계: {a.stage.label} ({a.stage.evidence()})")
         print(f"  - 감지된 키워드: {a.shop.found_keywords}")
         print(f"  - 감지된 가격 정보: {a.shop.price_patterns[:3]}")
         p = a.prices
@@ -74,21 +94,30 @@ def print_result(a):
         if a.page is not None:
             print(f"  - 사이트: {a.page.site or '모름'} / 상품명: {a.page.item_name or '찾지 못함'}"
                   f" / 결제 화면: {'예 ' + str(list(a.page.checkout_words)) if a.page.is_checkout else '아니오'}")
+            if a.page.is_checkout:
+                label = f" ('{a.page.total_label}' 옆)" if a.page.total_label else ' (라벨을 못 찾아 할인가 사용)'
+                print(f"  - 결제 금액: {_won(a.amount)}{label if a.amount else ''}")
     else:
         print("❌ [판정 결과] 쇼핑몰이 아닙니다.")
         print("  - 쇼핑몰 특유의 구매 버튼이나 가격 정보가 충분히 발견되지 않았습니다.")
 
 
+def check_params(a, item_name=None):
+    """서버 check에 보낼 값. 결제 화면이면 결제 금액을 보내고 원가/할인율은 보내지 않는다 (상품 하나의 값이 아님)"""
+    p, info = a.prices, a.page
+    product = not a.is_checkout
+    return dict(site=info.site, item_name=info.item_name if item_name is None else item_name, price=a.amount,
+                orig_price=(p.original_price or 0) if product else 0,
+                discount_rate=(p.discount_rate or 0) if product else 0,
+                is_checkout=a.is_checkout, page='product' if product else '', log=True)
+
+
 def send_and_print(client, a):
     """쇼핑 화면이면 서버에 위험도를 묻고 기록을 남긴 뒤 결과를 출력한다. 서버 결과(ApiResult 또는 None)를 돌려준다"""
-    if not a.shop.is_mall:
+    if not a.is_shopping:
         print("-" * 40)
         return None
-    p, info = a.prices, a.page
-    r = client.check(site=info.site, item_name=info.item_name, price=p.sale_price or 0,
-                     orig_price=p.original_price or 0,
-                     discount_rate=p.discount_rate if p.discount_rate is not None else 0,
-                     is_checkout=info.is_checkout, page='product', log=True)
+    r = client.check(**check_params(a))
     if r.ok:
         d = r.data
         print("  [서버] 위험도 판단")
@@ -103,7 +132,7 @@ def send_and_print(client, a):
         print(f"    - 충동구매 감지: {'예' if d.get('is_impulse') else '아니오'}")
         for text in popup_model.reason_texts(d):
             print(f"      · {text}")
-        if p.sale_price:
+        if a.amount:
             print(f"    - 지금 포기하면 {d.get('point', 0)}P, 24시간 참으면 {d.get('point2', 0)}P")
         event = '차단' if d.get('event') == 'blocked' else '감지'
         print(f"    - {event} 기록 저장 (번호 {d.get('bl_id')})")
