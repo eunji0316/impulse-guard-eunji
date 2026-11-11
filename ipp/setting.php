@@ -19,6 +19,31 @@ include_once(G5_PATH.'/head.php');
     <?php } ?>
 </p>
 
+<style>
+.ipp-switch-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 18px; margin:16px 0 8px;
+                  background:#fff; border:1px solid #e5e7eb; border-radius:10px; }
+.ipp-switch-row b { font-size:16px; }
+.ipp-switch-row small { display:block; margin-top:4px; color:#6b7280; }
+.ipp-switch { position:relative; display:inline-block; width:50px; height:28px; flex:none; }
+.ipp-switch input { opacity:0; width:0; height:0; }
+.ipp-switch span { position:absolute; inset:0; cursor:pointer; background:#d1d5db; border-radius:28px; transition:.2s; }
+.ipp-switch span:before { content:''; position:absolute; width:22px; height:22px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s; }
+.ipp-switch input:checked + span { background:#3b6cf6; }
+.ipp-switch input:checked + span:before { transform:translateX(22px); }
+.ipp-switch input:focus-visible + span { outline:2px solid #2448c4; outline-offset:2px; }
+.ipp-sites-off { opacity:.45; }
+</style>
+<div class="ipp-switch-row">
+    <div>
+        <b>쇼핑몰 전체 차단</b>
+        <small id="ipp_block_all_desc"><?php echo $st['st_block_all'] ? '차단 시간에는 모든 쇼핑 화면을 차단합니다.' : '차단 시간에는 아래에서 켜 둔 사이트만 차단합니다.'; ?></small>
+    </div>
+    <label class="ipp-switch" title="쇼핑몰 전체 차단">
+        <input type="checkbox" id="ipp_block_all" <?php echo $st['st_block_all'] ? 'checked' : ''; ?> onchange="ippBlockAll(this)">
+        <span></span>
+    </label>
+</div>
+
 <h3>차단 시간</h3>
 <p>
     <?php if ($is_blocking) { ?>
@@ -39,7 +64,10 @@ include_once(G5_PATH.'/head.php');
 
 <form id="ipp_setting_form" onsubmit="return ippSave(this);">
 <h3>차단할 사이트</h3>
-<p>
+<p id="ipp_sites_note" style="margin:0 0 6px;color:#6b7280;<?php echo $st['st_block_all'] ? '' : 'display:none;'; ?>">
+    <small>쇼핑몰 전체 차단이 켜져 있어 아래 선택과 상관없이 모두 차단합니다. 끄면 선택한 사이트만 차단합니다.</small>
+</p>
+<p id="ipp_sites" class="<?php echo $st['st_block_all'] ? 'ipp-sites-off' : ''; ?>">
     <?php foreach (IPP_BLOCK_SITES as $code => $site) { ?>
     <label style="margin-right:12px;">
         <input type="checkbox" name="sites[]" value="<?php echo $code; ?>" <?php echo in_array($code, $st['st_sites']) ? 'checked' : ''; ?>>
@@ -99,6 +127,27 @@ function ippPost(data) {
     fetch('<?php echo IPP_URL; ?>/api/setting.php', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(res => res.ok ? location.reload() : alert(res.msg));
+}
+// 쇼핑몰 전체 차단 토글: 바꾸면 바로 저장한다 (새로고침하지 않음, 실패하면 되돌림)
+function ippBlockAll(el) {
+    const fd = new FormData();
+    fd.append('action', 'block_all');
+    fd.append('on', el.checked ? '1' : '0');
+    el.disabled = true;
+    fetch('<?php echo IPP_URL; ?>/api/setting.php', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.ok) throw new Error(res.msg);
+            ippShowBlockAll(res.block_all);
+        })
+        .catch(e => { el.checked = !el.checked; alert(e.message || '저장하지 못했습니다.'); })
+        .finally(() => { el.disabled = false; });
+}
+function ippShowBlockAll(on) {
+    document.getElementById('ipp_block_all_desc').textContent = on
+        ? '차단 시간에는 모든 쇼핑 화면을 차단합니다.' : '차단 시간에는 아래에서 켜 둔 사이트만 차단합니다.';
+    document.getElementById('ipp_sites_note').style.display = on ? '' : 'none';
+    document.getElementById('ipp_sites').classList.toggle('ipp-sites-off', on);
 }
 function ippBlock(preset) {
     const until = document.getElementById('ipp_until').value;
