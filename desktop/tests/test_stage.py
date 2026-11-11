@@ -74,7 +74,8 @@ class TestSamples(unittest.TestCase):
         """실제 캡처: 상품 화면 3장과 뉴스는 결제 점수 0, 결제 화면 2장은 결제 화면"""
         expected = {'coupang_product': stage.PRODUCT, 'musinsa_product': stage.PRODUCT,
                     'zigzag_product': stage.PRODUCT, 'news_page': stage.NONE,
-                    'checkout_musinsa': stage.CHECKOUT, 'checkout_zigzag': stage.CHECKOUT}
+                    'checkout_musinsa': stage.CHECKOUT, 'checkout_zigzag': stage.CHECKOUT,
+                    'checkout_zigzag_benefit': stage.CHECKOUT}
         for name in cache.names():
             with self.subTest(name=name):
                 img, boxes, reread = cache.load(name)
@@ -99,6 +100,46 @@ class TestSamples(unittest.TestCase):
         self.assertIn(('결제동의', 2), a.stage.matched)
         self.assertGreaterEqual(a.stage.score, config.CHECKOUT_MIN_SCORE + 2)     # 기준선에 겨우 걸리지 않게
         self.assertEqual((a.page.site, a.amount, a.page.total_label), ('zigzag', 224910, '총결제금액'))
+
+
+    def test_real_checkout_zigzag_benefit(self):
+        """버그 화면 (detect.log 12:03:18에 15,006원으로 기록, 실제 224,910원): 구매 혜택 영역의 금액
+        ('최대 1,630원', 마일리지 '최대 1,630M', '최대 1,630원 혜택')은 후보에서 빠지고 총 결제금액 줄의 224,910원"""
+        img, boxes, reread = cache.load('checkout_zigzag_benefit')
+        a = main.analyze_boxes(boxes, img, reread)
+        self.assertEqual(a.stage.stage, stage.CHECKOUT)
+        self.assertEqual((a.page.site, a.amount, a.page.total_label), ('zigzag', 224910, '총결제금액'))
+        benefit = {c.value for c in price.find_tokens(boxes)[0] if price.benefit_word(c, boxes)}
+        self.assertEqual(benefit, {1630})
+
+    def test_real_checkout_zigzag_benefit_label_unread(self):
+        """같은 화면에서 OCR이 금액 라벨을 못 읽은 경우 (0.9배에서 '결서금역'으로 읽음):
+        상품 화면용 할인가가 구매 혜택 금액(630원)을 고르므로, 결제 화면에서는 할인가로 대신하지 않고 금액 모름"""
+        img, boxes, reread = cache.load('checkout_zigzag_benefit')
+        broken = [b for b in boxes if '결제금' not in stage.normalize(b.text)]
+        a = main.analyze_boxes(broken, img, reread)
+        self.assertEqual(a.stage.stage, stage.CHECKOUT)
+        self.assertIsNone(a.page.checkout_total)
+        a.prices.sale_price = 630          # 0.9배 OCR에서 상품 화면용 분석이 고른 할인가 ('최대 1,630원'을 630원으로 읽음)
+        self.assertEqual(a.amount, 0)      # 예전에는 630을 결제 금액으로 기록했다
+        self.assertIn('금액 라벨 못 찾음', self.log_line(a))
+
+    def log_line(self, a):
+        import tempfile
+        from impulse_guard.detect_log import DetectLog
+        with tempfile.TemporaryDirectory() as d:
+            log = DetectLog(log_dir=d, console=False)
+            try:
+                return log.event('auto', a)
+            finally:
+                log.close()
+
+    def test_log_has_amount_label(self):
+        """결제 화면 로그 줄에 금액을 찾은 라벨을 남긴다 (금액을 잘못 골랐을 때 원인 추적)"""
+        img, boxes, reread = cache.load('checkout_zigzag_benefit')
+        line = self.log_line(main.analyze_boxes(boxes, img, reread))
+        self.assertIn('| 224,910원 |', line)
+        self.assertIn('| 금액 라벨 총결제금액', line)
 
 
 class TestOcrFixes(unittest.TestCase):

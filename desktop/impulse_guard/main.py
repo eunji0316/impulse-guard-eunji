@@ -53,9 +53,14 @@ class Analysis:
 
     @property
     def amount(self):
-        """서버에 보낼 금액: 결제 화면이면 결제 금액(없으면 할인가), 상품 화면이면 할인가. 모르면 0"""
-        if self.is_checkout and self.page and self.page.checkout_total:
-            return self.page.checkout_total
+        """서버에 보낼 금액: 결제 화면이면 결제 금액 라벨 옆 금액, 상품 화면이면 할인가. 모르면 0
+
+        결제 화면에서 라벨 옆 금액을 못 찾으면 할인가로 대신하지 않는다. 상품 화면용 가격 분석은 결제 화면의
+        혜택/적립 금액을 할인가로 고를 수 있다 (실제 버그: 지그재그 '최대 1,630원' 혜택을 630원/15,006원으로 기록).
+        금액을 모르면 같은 주문은 화면 해시 거리로 판단한다 (dedup.py).
+        """
+        if self.is_checkout:
+            return int(self.page.checkout_total or 0) if self.page else 0
         return int((self.prices.sale_price if self.prices else 0) or 0)
 
 
@@ -105,8 +110,8 @@ def print_result(a):
             print(f"  - 사이트: {a.page.site or '모름'} / 상품명: {a.page.item_name or '찾지 못함'}"
                   f" / 결제 화면: {'예 ' + str(list(a.page.checkout_words)) if a.page.is_checkout else '아니오'}")
             if a.page.is_checkout:
-                label = f" ('{a.page.total_label}' 옆)" if a.page.total_label else ' (라벨을 못 찾아 할인가 사용)'
-                print(f"  - 결제 금액: {_won(a.amount)}{label if a.amount else ''}")
+                label = f" ('{a.page.total_label}' 옆)" if a.page.total_label else ' (결제 금액 라벨을 못 찾음)'
+                print(f"  - 결제 금액: {_won(a.amount)}{label}")
     else:
         print("❌ [판정 결과] 쇼핑몰이 아닙니다.")
         print("  - 쇼핑몰 특유의 구매 버튼이나 가격 정보가 충분히 발견되지 않았습니다.")
