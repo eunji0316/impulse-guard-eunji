@@ -178,6 +178,60 @@ class TestAutoDetectorTick(unittest.TestCase):
             self.assertEqual([d.tick(), d.tick()], ['own-console', 'own-console'])
             self.assertEqual(app.runs, [])
 
+    # ── 팝업이 맨 앞 창일 때 (B-5 버그: 확인 중 팝업에 금액이 안 채워짐) ──
+    def popup_front_detector(self, behind, amount=True):
+        """맨 앞 창은 우리 팝업, 그 전에 본 브라우저 창(hwnd 77). behind: grab_window가 돌려줄 Frame (None이면 못 구함)"""
+        frames = [Frame(img=H1, foreground_title='zigzag.kr/checkout/order-sheets/a1', foreground_exe='chrome.exe', hwnd=77)]
+        popup_frame = Frame(img=H3, foreground_title='충동구매 알림', foreground_exe='python.exe', hwnd=99)
+        grabs = []
+
+        def grab():
+            return frames.pop(0) if frames else popup_frame
+
+        def grab_window(hwnd):
+            grabs.append(hwnd)
+            return behind() if callable(behind) else behind
+        app = FakeApp()
+        app.amount_runs = []
+        app.run_amount = lambda img, h, title=None, origin=None: app.amount_runs.append((h, title, origin))
+        d = auto_detect.AutoDetector(app, 3, grab=grab, hasher=Script.hasher, grab_window=grab_window)
+        self.assertEqual(d.tick(), 'changing')            # 브라우저를 본다 → target_hwnd 77
+        self.assertEqual(d.target_hwnd, 77)
+        app.is_paused = True                              # 팝업이 떴다
+        app.wants_amount = lambda: amount
+        return d, app, grabs
+
+    def test_popup_in_front_captures_browser_behind(self):
+        """실제 버그 (02:40:47~02:41:05 own-console 7번): 확인 중 팝업이 맨 앞 창이 되면 금액 확인 회차를 모두 건너뛰었다.
+        마우스 휠 스크롤은 맨 앞 창을 바꾸지 않으므로, 팝업 아래의 브라우저 창(target_hwnd)을 직접 캡처한다"""
+        browser = Frame(img=H2, foreground_title='zigzag.kr/checkout/order-sheets/a1', foreground_exe='chrome.exe',
+                        origin=(10, 20), scope='window', hwnd=77)
+        d, app, grabs = self.popup_front_detector(lambda: dataclasses.replace(browser))
+        self.assertEqual([d.tick(), d.tick()], ['changing', 'amount'])    # 스크롤해서 바뀌고 → 멈추면 금액 확인
+        self.assertEqual(grabs, [77, 77])
+        self.assertTrue(d.behind_popup)
+        self.assertEqual(app.amount_runs, [(H2, 'zigzag.kr/checkout/order-sheets/a1', (10, 20))])
+        self.assertEqual(d.target_hwnd, 77)
+
+    def test_popup_in_front_without_browser_skips(self):
+        d, app, grabs = self.popup_front_detector(None)
+        self.assertEqual(d.tick(), 'own-console')
+        self.assertEqual(grabs, [77])
+
+    def test_popup_in_front_not_waiting_amount_skips(self):
+        """금액 확인 중이 아니면(금액 팝업, 차단 안내) 예전처럼 쉰다"""
+        d, app, grabs = self.popup_front_detector(None, amount=False)
+        self.assertEqual(d.tick(), 'paused')
+        self.assertEqual(grabs, [])
+
+    def test_target_hwnd_not_from_excluded_program(self):
+        frames = [Frame(img=H1, foreground_title='zigzag', foreground_exe='chrome.exe', hwnd=77),
+                  Frame(img=H2, foreground_title='코드', foreground_exe='Code.exe', hwnd=55)]
+        d = auto_detect.AutoDetector(FakeApp(), 3, grab=lambda: frames.pop(0), hasher=Script.hasher,
+                                     exclude_programs=['Code.exe'])
+        self.assertEqual([d.tick(), d.tick()], ['changing', 'excluded'])
+        self.assertEqual(d.target_hwnd, 77)
+
     def test_checkout_title_shortens_interval(self):
         """제목이 결제 페이지인 동안은 확인 간격도 짧게 (결제 페이지 안 스크롤을 빨리 본다)"""
         d, _ = self.detector(Script(H1, H1, H1, title='zigzag.kr/checkout/order-sheets/a1b2c3d4e5'))

@@ -13,6 +13,8 @@ F4 없이 interval_sec마다 화면을 확인한다. OCR(CPU 약 9초)은 비싸
 
 결제 금액 확인 중 팝업 (B-5): 결제 화면인데 금액을 못 읽고 팝업을 띄웠으면(app.wants_amount()) 쉬지 않고
 같은 순서로 화면을 보다가 멈추면 app.run_amount(팝업 영역을 지우고 OCR → 금액을 읽으면 팝업과 주문 기록에 채움)를 부른다.
+팝업이 맨 앞 창이 되어도(팝업을 클릭하거나 뜰 때 활성화됨) 마우스 휠 스크롤은 맨 앞 창을 바꾸지 않으므로,
+이때는 마지막으로 본 브라우저 창(target_hwnd)을 직접 캡처한다 (실제 버그: 팝업만 맨 앞이라 금액 확인 회차를 모두 건너뜀).
 
 제목으로 빨리 확인 (B-5): 기다리는 동안 AUTO_TITLE_POLL_SEC마다 맨 앞 창 제목만 확인한다(캡처 없음).
 제목이 결제 페이지(stage.is_checkout_title)로 바뀌면 interval_sec를 다 기다리지 않고 바로 확인하고,
@@ -34,13 +36,17 @@ SKIP_PAUSED, SKIP_OWN_CONSOLE, SKIP_EXCLUDED, SKIP_SAME, SKIP_CHANGING, SKIP_BUS
 
 
 class AutoDetector(threading.Thread):
-    def __init__(self, app, interval_sec, grab=None, hasher=None, log=None, exclude_programs=None, title_fn=None):
+    def __init__(self, app, interval_sec, grab=None, hasher=None, log=None, exclude_programs=None, title_fn=None,
+                 grab_window=None):
         super().__init__(name='auto-detect', daemon=True)
         self.app = app
         self.interval = interval_sec
         self.grab = grab or capture.grab_for_detect
         self.hasher = hasher or frame.dhash
         self.title_fn = title_fn or capture.foreground_title
+        self.grab_window = grab_window or capture.grab_window
+        self.target_hwnd = 0         # 마지막으로 분석 대상이 된 창 (이 프로그램 창, 감지 제외 프로그램이 아닌 맨 앞 창)
+        self.behind_popup = False    # 이번 회차는 팝업 아래의 target_hwnd를 캡처했다
         self.log = log
         self.exclude = {p.lower() for p in (exclude_programs or [])}
         self._stop_event = threading.Event()
@@ -112,6 +118,7 @@ class AutoDetector(threading.Thread):
         """한 회차. 결과 문자열을 돌려준다 (테스트와 요약용)"""
         self.last_distance = None
         self.grab_sec = self.hash_sec = None
+        self.behind_popup = False
         self.tick_at = timing.now()
         woke, self.title_woke = self.title_woke, False
         try:
@@ -128,6 +135,8 @@ class AutoDetector(threading.Thread):
                 extra.append(f'캡처 {self.grab_sec:.2f}')
             if self.hash_sec is not None:
                 extra.append(f'해시 {self.hash_sec:.2f}')
+            if self.behind_popup:
+                extra.append('팝업 아래 창')
             self.log.debug(f'auto {result}' + (f" ({', '.join(extra)})" if extra else ''))
         return result
 
@@ -152,14 +161,21 @@ class AutoDetector(threading.Thread):
             amount_mode = True                  # 결제 금액 확인 중 팝업: 금액만 읽는다
         t0 = timing.now()
         fr = self.grab()
+        if fr.foreground_title == config.CONSOLE_TITLE or fr.foreground_title in config.OWN_WINDOW_TITLES:
+            # 이 프로그램의 콘솔이나 알림 창이 맨 앞 창. 금액 확인 중이면 팝업 아래의 브라우저 창을 대신 캡처한다
+            behind = self.grab_window(self.target_hwnd) if amount_mode and self.target_hwnd else None
+            if behind is None:
+                self.grab_sec = timing.now() - t0
+                return SKIP_OWN_CONSOLE
+            fr, self.behind_popup = behind, True
         self.grab_sec = timing.now() - t0
         self._see_title(fr.foreground_title)
-        if fr.foreground_title == config.CONSOLE_TITLE or fr.foreground_title in config.OWN_WINDOW_TITLES:
-            return SKIP_OWN_CONSOLE             # 이 프로그램의 콘솔이나 알림 창 (팝업을 클릭하면 팝업이 맨 앞 창)
         if fr.foreground_exe and fr.foreground_exe.lower() in self.exclude:
             self.prev = None                    # 돌아왔을 때 화면이 멈췄는지 처음부터 본다
             self._forget_change()
             return SKIP_EXCLUDED
+        if fr.hwnd:
+            self.target_hwnd = fr.hwnd
         t0 = timing.now()
         h = self.hasher(fr.img)
         self.hash_sec = timing.now() - t0

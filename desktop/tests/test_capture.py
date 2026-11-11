@@ -77,5 +77,22 @@ class TestGrabActive(unittest.TestCase):
         self.assertEqual((fr.origin, fr.scope, fr.foreground_exe), ((5, 6), 'window', 'chrome.exe'))
 
 
+class TestGrabWindow(unittest.TestCase):
+    def test_gone_or_minimized_window(self):
+        """창이 없어졌거나 최소화됐으면 None (모니터 전체로 대신하지 않는다: 팝업까지 찍히므로)"""
+        with mock.patch.object(capture, 'window_rect', return_value=None):
+            self.assertIsNone(capture.grab_window(77))
+        self.assertIsNone(capture.grab_window(0))
+
+    def test_window_frame(self):
+        with mock.patch.object(capture, 'window_rect', return_value=(100, 50, 1300, 1000)), \
+                mock.patch.object(capture, 'grab_active', return_value=(np.zeros((950, 1200, 3), np.uint8), (100, 50), 'window')) as ga, \
+                mock.patch.object(capture, 'window_title', return_value='zigzag.kr/checkout/x'), \
+                mock.patch.object(capture, 'window_exe', return_value='chrome.exe'):
+            fr = capture.grab_window(77)
+        ga.assert_called_once_with(77)
+        self.assertEqual((fr.hwnd, fr.origin, fr.scope, fr.foreground_exe), (77, (100, 50), 'window', 'chrome.exe'))
+
+
 if __name__ == '__main__':
     unittest.main()
