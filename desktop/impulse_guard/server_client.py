@@ -40,6 +40,9 @@ def auto_settings(data=None):
     for key in ('enabled', 'save_ocr_text'):
         if isinstance(data.get(key), bool):
             out[key] = data[key]
+    programs = data.get('exclude_programs')
+    if isinstance(programs, list) and all(isinstance(p, str) for p in programs):
+        out['exclude_programs'] = [p.strip() for p in programs if p.strip()][:100]   # [] 이면 아무것도 제외하지 않음
     limits = {'interval_sec': (1, 60), 'same_order_minutes': (0, 24 * 60), 'blocked_repeat_sec': (0, 24 * 3600)}
     for key, (lo, hi) in limits.items():
         v = data.get(key)

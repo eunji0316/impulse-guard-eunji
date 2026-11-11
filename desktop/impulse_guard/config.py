@@ -155,6 +155,10 @@ AUTO_DETECT_DEFAULTS = {
     'same_order_minutes': 10,    # 같은 주문을 마지막으로 본 뒤 이 시간 안에는 다시 기록/팝업하지 않는다
     'blocked_repeat_sec': 60,    # 차단 안내 창을 닫은 뒤 같은 쇼핑몰에서 다시 띄우기까지의 시간
     'save_ocr_text': False,      # C-1 학습용 OCR 원문 저장 (상품 화면/쇼핑 아님만, 개인정보 마스킹)
+    # 맨 앞 창이 이 프로그램이면 자동 감지를 건너뛴다 (실행 파일 이름, 대소문자 무시)
+    # 코드 편집기와 터미널: 감지 결과나 가격 글자가 보여 쇼핑 화면으로 오인할 수 있다
+    'exclude_programs': ['Code.exe', 'WindowsTerminal.exe', 'OpenConsole.exe', 'conhost.exe',
+                         'cmd.exe', 'powershell.exe', 'pwsh.exe'],
 }
 AUTO_STOP_WAIT_SEC = 10          # 종료할 때 진행 중인 OCR을 기다리는 최대 시간
 # 화면 지각 해시 (frame.py): 16×16 dHash = 256비트

@@ -18,11 +18,35 @@ class Frame:
     """자동 감지 한 회차의 캡처. img는 분석 뒤 바로 버린다 (파일로 저장하지 않음)"""
     img: np.ndarray
     foreground_title: str = ''   # 캡처할 때 맨 앞 창 제목 (우리 콘솔이면 건너뛴다)
+    foreground_exe: str = ''     # 맨 앞 창의 실행 파일 이름 (예: 'chrome.exe'). 감지 제외 프로그램 확인용
 
 
 def grab_for_detect():
     """자동 감지용 캡처. 지금은 F4와 같은 주 모니터 전체 (B-5에서 활성 창만, 축소로 바꿀 자리)"""
-    return Frame(img=grab_screen(), foreground_title=foreground_title())
+    return Frame(img=grab_screen(), foreground_title=foreground_title(), foreground_exe=foreground_exe())
+
+
+def foreground_exe():
+    """맨 앞 창을 가진 프로세스의 실행 파일 이름 (Windows가 아니거나 실패하면 '')"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
+        handle = kernel32.OpenProcess(0x1000, False, pid.value)       # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ''
+        try:
+            size = wintypes.DWORD(1024)
+            buf = ctypes.create_unicode_buffer(size.value)
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                return ''
+            return buf.value.replace('/', '\\').rsplit('\\', 1)[-1]
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return ''
 
 
 def foreground_title():

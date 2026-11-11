@@ -399,7 +399,8 @@ def main():
     log = DetectLog(save_ocr_text=auto['save_ocr_text'])
     ui = popup.UiHost()                   # main 스레드에서 만든다
     app = App(client, ui, settings=auto, log=log)
-    detector = AutoDetector(app, auto['interval_sec'], log=log) if auto['enabled'] else None
+    detector = (AutoDetector(app, auto['interval_sec'], log=log, exclude_programs=auto['exclude_programs'])
+                if auto['enabled'] else None)
     print("\n" + "=" * 50)
     print("쇼핑몰 감지 프로그램이 실행되었습니다!")
     print_connection(client)
@@ -408,6 +409,8 @@ def main():
               f" 같은 주문은 {auto['same_order_minutes']}분 안에 다시 알리지 않습니다.")
     else:
         print("자동 감지: 꺼짐 (local_config.json의 auto_detect.enabled)")
+    if detector and auto['exclude_programs']:
+        print(f"감지 제외 프로그램 (맨 앞 창일 때): {', '.join(auto['exclude_programs'])}")
     print(f"[{config.HOTKEY.upper()}] 키를 누르면 지금 화면을 바로 분석합니다 (디버그용, 중복 검사 없음).")
     print(f"감지 로그: {log.dir}" + (" / OCR 원문 저장: 켜짐 (개인정보 마스킹)" if auto['save_ocr_text'] else ''))
     print("종료하려면 콘솔 창에서 [Ctrl + C]를 누르세요.")

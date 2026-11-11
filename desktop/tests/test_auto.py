@@ -68,15 +68,16 @@ class FakeApp:
 
 class Script:
     """캡처 순서를 정해 두는 가짜 grab/hasher. 이미지 대신 해시 값을 넣는다"""
-    def __init__(self, *hashes, title=''):
+    def __init__(self, *hashes, title='', exe='chrome.exe'):
         self.hashes = list(hashes)
         self.title = title
+        self.exe = exe
         self.grabs = 0
 
     def grab(self):
         self.grabs += 1
         h = self.hashes.pop(0) if len(self.hashes) > 1 else self.hashes[0]
-        return Frame(img=h, foreground_title=self.title)
+        return Frame(img=h, foreground_title=self.title, foreground_exe=self.exe)
 
     @staticmethod
     def hasher(img):
@@ -111,6 +112,21 @@ class TestAutoDetectorTick(unittest.TestCase):
         app.is_paused = True
         self.assertEqual(d.tick(), 'paused')
         self.assertEqual(script.grabs, 0)
+
+    def test_excluded_programs(self):
+        """맨 앞 창이 감지 제외 프로그램이면 캡처만 하고 분석하지 않는다 (대소문자 무시)"""
+        script = Script(H1, exe='code.EXE')
+        app = FakeApp()
+        d = auto_detect.AutoDetector(app, 3, grab=script.grab, hasher=script.hasher,
+                                     exclude_programs=['Code.exe', 'WindowsTerminal.exe'])
+        self.assertEqual([d.tick(), d.tick(), d.tick()], ['excluded'] * 3)
+        self.assertEqual(app.runs, [])
+        script.exe = 'chrome.exe'                        # 브라우저로 돌아오면 멈췄는지 처음부터 본다
+        self.assertEqual([d.tick(), d.tick()], ['changing', 'analyzed'])
+
+    def test_no_exclusion_by_default(self):
+        d, app = self.detector(Script(H1, H1, exe='Code.exe'))
+        self.assertEqual([d.tick(), d.tick()], ['changing', 'analyzed'])
 
     def test_own_console_skipped(self):
         d, app = self.detector(Script(H1, title=config.CONSOLE_TITLE))
@@ -458,6 +474,14 @@ class TestMask(unittest.TestCase):
 class TestAutoSettings(unittest.TestCase):
     def test_defaults(self):
         self.assertEqual(server_client.auto_settings(None), config.AUTO_DETECT_DEFAULTS)
+
+    def test_exclude_programs(self):
+        self.assertIn('Code.exe', server_client.auto_settings(None)['exclude_programs'])
+        s = server_client.auto_settings({'exclude_programs': [' chrome.exe ', '', 'Notepad.exe']})
+        self.assertEqual(s['exclude_programs'], ['chrome.exe', 'Notepad.exe'])
+        self.assertEqual(server_client.auto_settings({'exclude_programs': []})['exclude_programs'], [])
+        self.assertEqual(server_client.auto_settings({'exclude_programs': 'Code.exe'})['exclude_programs'],
+                         config.AUTO_DETECT_DEFAULTS['exclude_programs'])          # 목록이 아니면 기본값
 
     def test_override_and_invalid(self):
         s = server_client.auto_settings({'enabled': False, 'interval_sec': 5, 'same_order_minutes': 'x',

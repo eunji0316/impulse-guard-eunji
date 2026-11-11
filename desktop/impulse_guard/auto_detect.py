@@ -2,7 +2,8 @@
 
 F4 없이 interval_sec마다 화면을 확인한다. OCR(CPU 약 9초)은 비싸므로 아래 순서로 거른다.
 
-    1. 일시 중지: 알림 창이 떠 있거나 분석 중(F4 포함), 맨 앞 창이 이 프로그램의 콘솔이면 건너뜀
+    1. 일시 중지: 알림 창이 떠 있거나 분석 중(F4 포함), 맨 앞 창이 이 프로그램의 콘솔이거나
+       감지 제외 프로그램(local_config.json의 exclude_programs, 예: Code.exe)이면 건너뜀
     2. 캡처 → dHash (capture.grab_for_detect, frame.dhash)
     3. 직전에 분석한 화면과 거의 같으면(FRAME_SAME_DISTANCE 이하) OCR 생략 → app.still_same()
        결제 화면에 머무는 동안 같은 화면을 반복 분석/기록하지 않는다
@@ -16,18 +17,19 @@ import threading
 
 from . import capture, config, frame
 
-SKIP_PAUSED, SKIP_OWN_CONSOLE, SKIP_SAME, SKIP_CHANGING, SKIP_BUSY, ANALYZED = (
-    'paused', 'own-console', 'same', 'changing', 'busy', 'analyzed')
+SKIP_PAUSED, SKIP_OWN_CONSOLE, SKIP_EXCLUDED, SKIP_SAME, SKIP_CHANGING, SKIP_BUSY, ANALYZED = (
+    'paused', 'own-console', 'excluded', 'same', 'changing', 'busy', 'analyzed')
 
 
 class AutoDetector(threading.Thread):
-    def __init__(self, app, interval_sec, grab=None, hasher=None, log=None):
+    def __init__(self, app, interval_sec, grab=None, hasher=None, log=None, exclude_programs=None):
         super().__init__(name='auto-detect', daemon=True)
         self.app = app
         self.interval = interval_sec
         self.grab = grab or capture.grab_for_detect
         self.hasher = hasher or frame.dhash
         self.log = log
+        self.exclude = {p.lower() for p in (exclude_programs or [])}
         self._stop_event = threading.Event()
         self.last_analyzed = None    # 마지막으로 OCR한 화면의 해시
         self.prev = None             # 바로 앞 회차의 해시
@@ -57,6 +59,9 @@ class AutoDetector(threading.Thread):
         fr = self.grab()
         if fr.foreground_title == config.CONSOLE_TITLE:
             return SKIP_OWN_CONSOLE
+        if fr.foreground_exe and fr.foreground_exe.lower() in self.exclude:
+            self.prev = None                    # 돌아왔을 때 화면이 멈췄는지 처음부터 본다
+            return SKIP_EXCLUDED
         h = self.hasher(fr.img)
         if frame.distance(h, self.last_analyzed) <= config.FRAME_SAME_DISTANCE:
             self.prev = h

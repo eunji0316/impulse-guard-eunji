@@ -7,6 +7,8 @@
     "interval_sec": 3,
     "same_order_minutes": 10,
     "blocked_repeat_sec": 60,
-    "save_ocr_text": false
+    "save_ocr_text": false,
+    "exclude_programs": ["Code.exe", "WindowsTerminal.exe", "OpenConsole.exe", "conhost.exe",
+                         "cmd.exe", "powershell.exe", "pwsh.exe"]
   }
 }
