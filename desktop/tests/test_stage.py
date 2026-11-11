@@ -132,6 +132,55 @@ class TestCheckoutTotal(unittest.TestCase):
     def test_not_found(self):
         self.assertEqual(price.find_checkout_total(cs.boxes([('주문서', 40, 30), ('배송지', 40, 60)])), (None, ''))
 
+    # ── 혜택/적립/쿠폰/할인 금액 제외 (실제 버그: 지그재그 결제 금액을 구매 혜택 금액 15,006원으로 기록) ──
+    def test_benefit_badge_on_same_line_is_not_total(self):
+        """라벨 아래에 결제 금액, 같은 줄 오른쪽에 적립 배지: 같은 줄이 우선이어도 적립 금액은 고르지 않는다"""
+        b = cs.boxes([('총 결제금액', 40, 300, 80, 16), ('최대 15,006원 적립', 700, 300, 130, 16),
+                      ('224,910원', 40, 322, 90, 20)])
+        self.assertEqual(price.find_checkout_total(b), (224910, '총결제금액'))
+
+    def test_benefit_row_label_excluded(self):
+        """두 단 화면: 왼쪽 '총 결제금액'(금액은 아래)과 같은 줄 오른쪽 단의 '구매 혜택 … 최대 | 15,006원'.
+        항목 이름이 금액과 떨어져 있고 사이에 꾸밈말 상자가 있어도 혜택 금액으로 보고 뺀다"""
+        b = cs.boxes([('총 결제금액', 40, 300, 80, 16),
+                      ('구매 혜택', 500, 300, 70, 16), ('최대', 650, 300, 30, 16), ('15,006원', 690, 300, 70, 16),
+                      ('224,910원', 40, 322, 90, 20)])
+        self.assertEqual(price.find_checkout_total(b), (224910, '총결제금액'))
+
+    def test_discount_coupon_point_rows_excluded(self):
+        for label in ('쿠폰 할인', '포인트 사용', '즉시 할인', '마일리지', '카드 캐시백'):
+            with self.subTest(label=label):
+                b = cs.boxes([('총 결제금액', 40, 300, 80, 16), (label, 500, 300, 80, 16), ('-15,006원', 690, 300, 70, 16),
+                              ('224,910원', 40, 322, 90, 20)])
+                self.assertEqual(price.find_checkout_total(b)[0], 224910)
+
+    def test_benefit_only_gives_none(self):
+        """결제 금액 근처에 혜택 금액밖에 없으면 잘못 고르지 않고 '모름' (같은 주문은 해시 거리로 판단)"""
+        b = cs.boxes([('총 결제금액', 40, 300, 80, 16), ('최대 15,006원 적립', 700, 300, 130, 16)])
+        self.assertEqual(price.find_checkout_total(b), (None, ''))
+
+    def test_total_label_with_discount_word_kept(self):
+        """결제 금액 라벨 자체에 '할인'이 들어 있으면 빼지 않는다"""
+        b = cs.boxes([('총 결제금액(할인 포함)', 40, 300, 160, 16), ('33,000원', 700, 300, 80, 16)])
+        self.assertEqual(price.find_checkout_total(b), (33000, '총결제금액'))
+        b = cs.boxes([('총 결제금액 33,000원 (쿠폰 적용)', 40, 300, 260, 16)])
+        self.assertEqual(price.find_checkout_total(b)[0], 33000)
+
+    def test_benefit_word_reasons(self):
+        b = cs.boxes([('구매 혜택', 40, 300, 70, 16), ('최대', 650, 300, 30, 16), ('630원', 690, 300, 50, 16),
+                      ('최대 1,630원 혜택', 40, 340, 130, 16), ('미버심 적림', 40, 380, 90, 16), ('1,130원', 690, 380, 60, 16),
+                      ('상품 금액', 40, 420, 70, 16), ('224,910원', 690, 420, 80, 16)])
+        found = {c.value: price.benefit_word(c, b) for c in price.find_tokens(b)[0]}
+        self.assertEqual(found, {630: '혜택', 1630: '혜택', 1130: '적림', 224910: ''})
+
+    def test_real_zigzag_benefit_area_not_total(self):
+        """실제 캡처 지그재그: 구매 혜택 영역(최대 630원, 최대 1,630원 혜택)의 금액은 결제 금액 후보가 아니다"""
+        _, boxes, _ = cache.load('checkout_zigzag')
+        reasons = {c.text: price.benefit_word(c, boxes) for c in price.find_tokens(boxes)[0]}
+        self.assertEqual(reasons['630원'], '혜택')
+        self.assertTrue(reasons['1,630원'])
+        self.assertEqual(reasons['224,910원'], '')
+
     def test_far_below_is_ignored(self):
         b = cs.boxes([('최종 결제금액', 40, 300, 140, 20), ('12,500원', 40, 500, 100, 20)])
         self.assertEqual(price.find_checkout_total(b), (None, ''))
