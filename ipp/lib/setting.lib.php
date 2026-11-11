@@ -32,6 +32,7 @@ function ipp_setting_get($mb_id, $reset = false) {
     }
 
     $st['st_sites']    = ipp_json_list($st['st_sites']);
+    $st['st_block_all'] = isset($st['st_block_all']) ? (int)$st['st_block_all'] : 1;   // 008 실행 전 DB면 기본값 ON
     $st['st_keywords'] = ipp_json_list($st['st_keywords']);
     return $cache[$mb_id] = $st;
 }
@@ -103,14 +104,27 @@ function ipp_block_stop($mb_id) {
     ipp_setting_get($mb_id, true);
 }
 
-// 지금 차단 중인지. $site를 주면 그 사이트가 차단 목록에 있어야 true
+// 지금 차단 중인지
+// - 쇼핑몰 전체 차단(st_block_all = 1, 기본)이면 차단 시간에는 사이트와 상관없이 true
+// - 끄면 $site가 차단 목록(st_sites)에 있어야 true. $site가 ''(사이트 모름, 데스크톱)면 차단 시간인지만 본다
 function ipp_is_blocking($mb_id, $site = '') {
     if (!IPP_USE_SETTING || !$mb_id) return false;
 
     $st = ipp_setting_get($mb_id);
     if (!$st['st_block_until'] || $st['st_block_until'] <= G5_TIME_YMDHIS) return false;
-    if ($site !== '' && !in_array($site, $st['st_sites'])) return false;
+    if (!$st['st_block_all'] && $site !== '' && !in_array($site, $st['st_sites'])) return false;
     return true;
+}
+
+// 쇼핑몰 전체 차단 켜기/끄기 (설정 화면 맨 위 토글. 바꾸면 바로 저장)
+function ipp_setting_set_block_all($mb_id, $on) {
+    global $g5;
+    ipp_setting_get($mb_id);   // 행이 없으면 먼저 만든다
+    sql_query(" UPDATE {$g5['ipp_setting_table']}
+                SET st_block_all       = '".($on ? 1 : 0)."',
+                    st_update_datetime = '".G5_TIME_YMDHIS."'
+                WHERE mb_id = '".sql_real_escape_string($mb_id)."' ");
+    ipp_setting_get($mb_id, true);
 }
 
 // $text에 들어 있는 첫 키워드 반환 (대소문자 무시). 없으면 ''

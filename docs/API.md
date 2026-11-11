@@ -120,14 +120,15 @@ Authorization: Bearer 3f9a...(64자리)
 { "client": "desktop", "action": "setting" }
 ```
 
-응답 (차단 중일 때, 쿠팡을 차단 목록에서 끈 경우)
+응답 (차단 중, 쇼핑몰 전체 차단 켬, 쿠팡을 차단 목록에서 끈 경우)
 
 ```json
 {
   "ok": true,
   "is_blocking": true,
-  "block_until": "2026-11-11 03:57:20",
+  "block_until": "2026-11-11 09:53:16",
   "block_remain": 3600,
+  "block_all": true,
   "sites": [
     { "code": "naver",   "name": "네이버쇼핑", "domain": "shopping.naver.com", "on": true },
     { "code": "coupang", "name": "쿠팡",       "domain": "coupang.com",        "on": false },
@@ -143,7 +144,8 @@ Authorization: Bearer 3f9a...(64자리)
 
 - 차단 중이 아니면 `is_blocking: false`, `block_until: null`, `block_remain: 0`
 - `block_remain`: 차단이 끝날 때까지 남은 초. PC 시계가 틀려도 맞도록, 종료 시각은 이 값으로 계산합니다.
-- `sites[].on`: 이 사이트가 차단 목록에 켜져 있는지. 사이트 목록은 `extend/ipp.extend.php`의 `IPP_BLOCK_SITES`
+- `block_all`: 쇼핑몰 전체 차단 (회원 설정 화면 맨 위 토글, 기본 켬). `true`면 차단 시간에 `sites[].on`과 상관없이 모든 쇼핑 화면을 차단합니다. 위 예시에서 쿠팡은 꺼져 있지만 전체 차단이 켜져 있어 쿠팡도 차단됩니다.
+- `sites[].on`: 이 사이트가 차단 목록에 켜져 있는지. `block_all`이 `false`일 때만 차단에 쓰입니다. 사이트 목록은 `extend/ipp.extend.php`의 `IPP_BLOCK_SITES`
 - `keywords`: 회원 차단 키워드 (최대 20개, 각 20자)
 - 데스크톱 프로그램은 이 응답을 5분간 캐시합니다.
 
@@ -202,7 +204,12 @@ Authorization: Bearer 3f9a...(64자리)
 }
 ```
 
-- `is_blocking`: 지금 차단 시간이고 이 사이트가 차단 목록에 켜져 있으면 true. **`site`가 `""`이면 사이트 목록과 상관없이 차단 시간인지만 봅니다**
+- `is_blocking`: 지금 차단 시간인지. 사이트는 이렇게 봅니다.
+
+  | 쇼핑몰 전체 차단 (`block_all`) | `site`가 목록에 켜진 사이트 | 목록에서 끈 사이트 | `""` (사이트 모름) |
+  |---|---|---|---|
+  | 켬 (기본) | 차단 | **차단** | 차단 |
+  | 끔 | 차단 | 차단 아님 | 차단 (차단 시간만 봄) |
 - `is_impulse`: 충동구매 감지 1, 아니면 0 (숫자). 규칙: 회원 키워드가 상품명에 있거나, 심야(23시~4시 전) 또는 고액(50,000원 이상). `reasons`가 비어 있지 않으면 1입니다.
 - `reasons`: 충동구매로 본 이유 목록 (B-3 추가). 중요한 것부터 `keyword`(회원 키워드) → `big`(고액) → `night`(심야) 순서입니다. 없으면 `[]`. `text`는 화면에 그대로 보여 줄 문구입니다 (심야: `"밤 11시~새벽 4시 사이의 심야 쇼핑이에요."`). 기준값은 `extend/ipp.extend.php`의 `IPP_DETECT_*`에서 가져옵니다.
 - `keyword`: 상품명에서 찾은 첫 키워드. 없으면 `""` (예: 상품명 `[특가] 무선 이어폰` → `"특가"`)
@@ -407,6 +414,7 @@ client.decide(r.data['bl_id'], 'buy')                    # 그래도 구매할�
 | action | 요청 칸 | 실제 성공 응답 |
 |---|---|---|
 | `save` | `sites[]`(사이트 코드 여러 개), `keywords`(쉼표 구분), `risk_alert`(값이 있으면 켬) | `{"ok": true, "sites": ["coupang", "musinsa"], "keywords": ["세일", "특가"]}` |
+| `block_all` | `on`: `1` 켬, `0` 끔 (쇼핑몰 전체 차단 토글. 설정 화면에서 바꾸면 바로 저장) | `{"ok": true, "block_all": false}` |
 | `block` | `preset`: `1h`, `today`(오늘 23:59:59까지), `week`, `custom` / `until`: custom일 때 종료 시각 (지금 이후 30일 이내) | `{"ok": true, "until": "2026-11-11 04:02:26"}` |
 | `unblock` | 없음 | `{"ok": true}` |
 | `regen_token` | 없음 | `{"ok": true, "token": "3f9a...(64자리)", "server": "http://localhost:8001"}` (`IPP_USE_CLIENT_API` 필요) |
