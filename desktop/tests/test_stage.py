@@ -144,9 +144,13 @@ class TestSamples(unittest.TestCase):
 
 class TestCheckoutTitle(unittest.TestCase):
     def test_titles(self):
-        for title in ('주문/결제 | 지그재그', '주문서 작성 - 무신사', '쿠팡! | 주문하기', 'Checkout - Shop', 'PAYMENT'):
+        for title in ('주문/결제 | 지그재그', '주문서 작성 - 무신사', '쿠팡! | 주문하기', 'Checkout - Shop', 'PAYMENT',
+                      'zigzag.kr/checkout/order-sheets/abc', 'musinsa.com/order/order-form',
+                      'checkout.coupang.com/ssr/desktop/order/123', 'shop.example.com/OrderSheet?id=1',
+                      'www.example.co.kr/payment/start'):
             self.assertTrue(stage.is_checkout_title(title), title)
-        for title in ('상품 상세 - 지그재그', '장바구니', '', None, '네이버 뉴스'):
+        for title in ('상품 상세 - 지그재그', '장바구니', '', None, '네이버 뉴스', 'Border Collie 사진',
+                      'Voice Recorder', 'zigzag.kr/catalog/products/123', 'musinsa.com/products/456'):
             self.assertFalse(stage.is_checkout_title(title), title)
 
 

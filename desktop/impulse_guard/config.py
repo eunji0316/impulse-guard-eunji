@@ -185,7 +185,11 @@ FRAME_SAME_DISTANCE = 6          # 직전 분석 화면과 이 이하로 다르�
 FRAME_SETTLE_DISTANCE = 12       # 바로 앞 회차와 이 이하로 다르면 화면이 멈춘 것으로 본다 (광고 배너 등 작은 움직임 허용)
 AUTO_SETTLE_SEC = 1.0            # 화면이 바뀌는 중이면 interval_sec를 다 기다리지 않고 이 시간 뒤 다시 확인
 # 창 제목으로 빨리 확인 (B-5). 제목은 기다리는 시간만 바꾸고 판정에는 쓰지 않는다 (판정은 OCR). 제목 글자는 로그에 남기지 않는다
-CHECKOUT_TITLE_WORDS = ['결제', '주문서', '주문하기', '구매하기', 'checkout', 'payment']   # 대소문자 무시
+# 탭 제목이 따로 없으면 주소가 제목이 된다. 지그재그 'zigzag.kr/checkout/order-sheets/...',
+# 무신사 'musinsa.com/order/order-form', 쿠팡 'checkout.coupang.com/.../order/...'(직접 확인 못 함)
+# 'order'만 쓰면 'border', 'recorder' 같은 제목에도 걸려서 주소 경로 모양('/order', 'order-sheet', 'order-form')으로 찾는다
+CHECKOUT_TITLE_WORDS = ['결제', '주문서', '주문하기', '구매하기', 'checkout', 'payment',
+                        'order-sheet', 'ordersheet', 'order-form', 'orderform', '/order']   # 대소문자 무시
 AUTO_TITLE_POLL_SEC = 0.2        # 기다리는 동안 맨 앞 창 제목을 확인하는 간격. 결제 페이지 제목으로 바뀌면 바로 확인
 AUTO_FAST_SETTLE_SEC = 0.5       # 제목이 결제 페이지일 때 멈춤 확인 간격 (AUTO_SETTLE_SEC 대신)
 ORDER_SAME_DISTANCE = 20         # 결제 금액을 못 읽었을 때, 이 이하로 다르면 같은 주문
