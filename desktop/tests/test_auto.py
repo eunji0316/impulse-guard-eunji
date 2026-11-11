@@ -171,6 +171,13 @@ class TestAutoDetectorTick(unittest.TestCase):
         d._stop_event.set()
         self.assertTrue(d.wait(5))
 
+    def test_own_popup_window_not_captured(self):
+        """팝업을 클릭해 팝업이 맨 앞 창이면 캡처/분석하지 않는다 (실제 로그: 422x556 팝업만 캡처)"""
+        for title in config.OWN_WINDOW_TITLES:
+            d, app = self.detector(Script(H1, H1, title=title))
+            self.assertEqual([d.tick(), d.tick()], ['own-console', 'own-console'])
+            self.assertEqual(app.runs, [])
+
     def test_checkout_title_shortens_interval(self):
         """제목이 결제 페이지인 동안은 확인 간격도 짧게 (결제 페이지 안 스크롤을 빨리 본다)"""
         d, _ = self.detector(Script(H1, H1, H1, title='zigzag.kr/checkout/order-sheets/a1b2c3d4e5'))
@@ -631,6 +638,117 @@ class TestHandleAuto(TkCase):
         self.assertTrue((seen[0][10:10 + y1 - y0, 10:10 + x1 - x0] == 255).all())
         self.assertEqual(int(seen[0][:10].sum()), 0)
         self.close_window(app)
+
+    # ── 팝업 순서 (B-5 버그: '확인 중' 팝업이 금액 팝업보다 뒤에 뜸) ──
+    T1 = 'zigzag.kr/checkout/order-sheets/a1b2c3d4e5'
+    T2 = 'zigzag.kr/checkout/order-sheets/f6e7d8c9b0'
+
+    def checkout_titled(self, a, title):
+        a = dataclasses.replace(a)
+        a.title_key = title_key(title)
+        return a
+
+    def first_popup_closed(self):
+        """실제 로그 02:20:19: 금액이 보이는 결제 화면 → 금액 팝업(조금 더 생각하기 켜짐) → X로 닫음"""
+        app = self.make_app(check=(200, CHECKOUT_RESULT), decide=(200, {'ok': True}))
+        self.assertTrue(self.handle(app, self.checkout_titled(self.checkout, self.T1), H1))
+        self.assertFalse(app.window.view.pending)
+        with quiet():
+            app.window.on_x()
+            self.assertTrue(self.pump(lambda: app.window is None))
+        self.assertEqual(self.fake.count('check'), 1)
+        return app
+
+    def test_reentry_unknown_amount_waits_then_same_order(self):
+        """재현 (02:20:36~02:21:13): 같은 장바구니로 다시 들어오면 주문서 주소(탭 제목)가 바뀌고, 맨 위라 금액을 모른다.
+        예전: 새 주문 → '확인 중' 팝업이 금액 팝업 뒤에 또 뜸. 지금: 금액을 읽을 때까지 미루고, 같은 금액이면 팝업 없음"""
+        app = self.first_popup_closed()
+        self.assertFalse(self.handle(app, self.checkout_titled(self.no_amount(), self.T2), H2))
+        self.assertIsNone(app.window)                     # '확인 중' 팝업을 바로 띄우지 않는다
+        self.assertIsNotNone(app.waiting)
+        self.assertIn('| wait |', self.log_lines()[-1])
+        self.clock.t += 2
+        self.assertFalse(self.handle(app, self.checkout_titled(self.checkout, self.T2), H3))   # 스크롤해서 금액을 읽음
+        self.assertIsNone(app.window)
+        self.assertIsNone(app.waiting)
+        self.assertEqual(self.fake.count('check'), 1)    # 서버 기록도 다시 하지 않는다
+        self.assertEqual(len(app.orders.orders), 1)
+        self.assertIn('금액 확인 후 최근 주문과 같은 주문', self.log_lines()[-1])
+        self.clock.t += 5                                  # 다시 '구매하기' (같은 금액, 또 다른 제목)
+        app.orders.left()
+        self.assertFalse(self.handle(app, self.checkout_titled(self.checkout, 'zigzag.kr/checkout/order-sheets/x9y8z7w6v5'), H1))
+        self.assertIn('| revisit |', self.log_lines()[-1])
+
+    def test_reentry_different_amount_is_new_popup_with_amount(self):
+        """기다리는 동안 읽은 금액이 다르면 다른 장바구니: 바로 금액이 채워진 팝업 (확인 중을 거치지 않음)"""
+        app = self.first_popup_closed()
+        self.handle(app, self.checkout_titled(self.no_amount(), self.T2), H2)
+        other = dataclasses.replace(self.checkout, page=dataclasses.replace(self.checkout.page, checkout_total=85400))
+        self.assertTrue(self.handle(app, self.checkout_titled(other, self.T2), H3))
+        self.assertFalse(app.window.view.pending)
+        self.assertEqual(app.window.price_label['text'], '85,400원')
+        self.assertIn('금액 확인 후 새 주문', self.log_lines()[-1])
+        self.close_window(app)
+
+    def test_wait_expires_then_pending_popup(self):
+        """금액을 끝내 못 읽으면 CHECKOUT_AMOUNT_WAIT_SEC 뒤 '확인 중' 팝업 (화면이 그대로여도: still_same)"""
+        app = self.first_popup_closed()
+        self.handle(app, self.checkout_titled(self.no_amount(), self.T2), H2)
+        self.assertFalse(app.still_same())                # 아직 기다리는 중
+        self.clock.t += config.CHECKOUT_AMOUNT_WAIT_SEC
+        with quiet():
+            self.assertTrue(app.still_same())
+            self.assertTrue(self.pump(lambda: app.window is not None))
+        self.assertTrue(app.window.view.pending)
+        self.assertIn('못 읽어 확인 중으로 띄움', self.log_lines()[-1])
+        self.close_window(app)
+
+    def test_no_wait_without_recent_order(self):
+        """같은 쇼핑몰의 최근 주문이 없으면 미루지 않고 바로 '확인 중' 팝업"""
+        app = self.make_app(check=(200, CHECKOUT_RESULT))
+        self.assertTrue(self.handle(app, self.checkout_titled(self.no_amount(), self.T1), H1))
+        self.assertTrue(app.window.view.pending)
+        self.assertIsNone(app.waiting)
+        self.close_window(app)
+
+    def test_leaving_cancels_wait(self):
+        app = self.first_popup_closed()
+        self.handle(app, self.checkout_titled(self.no_amount(), self.T2), H2)
+        self.assertFalse(self.handle(app, self.news, H3))
+        self.assertIsNone(app.waiting)
+
+    def test_fill_is_one_way_and_ignores_stale_round(self):
+        """팝업 상태는 '확인 중 → 금액'으로만. 늦게 도착한 오래된 회차 결과는 버린다"""
+        app = self.pending_app()
+        w = app.window
+        self.assertTrue(w.fill_price(85400, seq=5))
+        self.assertFalse(w.fill_price(149000, seq=3))      # 오래된 회차
+        self.assertFalse(w.fill_price(149000, seq=6))      # 이미 금액 표시: 다시 바꾸지 않음
+        self.assertEqual((w.view.price, w.view.pending, w.price_label['text']), (85400, False, '85,400원'))
+        self.close_window(app)
+
+    def test_pending_view_for_known_order_shows_amount(self):
+        """팝업을 띄우는 사이 그 주문의 금액을 알게 됐으면 '확인 중'이 아니라 금액으로 띄운다"""
+        app = self.make_app(check=(200, CHECKOUT_RESULT))
+        a = self.no_amount()
+        order = app.orders.see('coupang', 0, H1)
+        order.order.amount = 49600
+        _, view = popup_model.build(a, server_client.ApiResult(True, CHECKOUT_RESULT))
+        self.assertTrue(view.pending)
+        self.assertTrue(app.try_begin())
+        app.show('impulse', view, site='coupang', order=order.order)
+        self.assertEqual((app.window.view.pending, app.window.price_label['text']), (False, '49,600원'))
+        self.close_window(app)
+
+    def test_rounds_numbered_in_timing(self):
+        app = self.make_app()
+        app.analyze_frame = lambda img: self.product
+        for _ in range(2):
+            self.assertTrue(app.try_begin())
+            with timing.active(timing.Timing('auto')) as t:
+                app.run_auto(object(), H1)
+        self.assertEqual(t.info['회차'], 2)
+        self.assertIn('회차 2', self.log_lines(timing_lines=True)[-1])
 
     def test_mask_rect(self):
         img = np.zeros((100, 200, 3), np.uint8)

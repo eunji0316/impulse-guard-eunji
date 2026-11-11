@@ -154,8 +154,8 @@ class AutoDetector(threading.Thread):
         fr = self.grab()
         self.grab_sec = timing.now() - t0
         self._see_title(fr.foreground_title)
-        if fr.foreground_title == config.CONSOLE_TITLE:
-            return SKIP_OWN_CONSOLE
+        if fr.foreground_title == config.CONSOLE_TITLE or fr.foreground_title in config.OWN_WINDOW_TITLES:
+            return SKIP_OWN_CONSOLE             # 이 프로그램의 콘솔이나 알림 창 (팝업을 클릭하면 팝업이 맨 앞 창)
         if fr.foreground_exe and fr.foreground_exe.lower() in self.exclude:
             self.prev = None                    # 돌아왔을 때 화면이 멈췄는지 처음부터 본다
             self._forget_change()

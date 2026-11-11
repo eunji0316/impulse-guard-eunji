@@ -277,6 +277,7 @@ class ImpulsePopup(_Window):
         self.link_url = link_url
         self.busy = False
         self.done = False
+        self.applied_seq = 0                    # 마지막으로 반영한 분석 회차 번호 (fill_price)
         px = host.px
 
         # ── 묻는 화면 ──
@@ -333,8 +334,14 @@ class ImpulsePopup(_Window):
         self.place()
 
     # ── 결제 금액 채우기 (B-5) ──
-    def fill_price(self, price):
-        """main 스레드: '결제 금액 확인 중' 팝업에 읽은 금액을 채운다. 채웠으면 True"""
+    def fill_price(self, price, seq=None):
+        """main 스레드: '결제 금액 확인 중' 팝업에 읽은 금액을 채운다. 채웠으면 True
+        상태는 '확인 중 → 금액'으로만 바뀐다 (view.pending일 때만). seq(분석 회차 번호)가 이미 반영한 회차보다
+        오래됐으면 무시한다 (늦게 도착한 결과가 최신 결과를 덮어쓰지 않게)"""
+        if seq is not None:
+            if seq <= self.applied_seq:
+                return False
+            self.applied_seq = seq
         if self.closed or self.done or self.busy or not popup_model.fill_price(self.view, price):
             return False
         self.price_label.configure(text=self.view.price_text, font=self.host.font(15, True), fg=C['text'])

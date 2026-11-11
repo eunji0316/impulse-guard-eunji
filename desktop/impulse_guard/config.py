@@ -205,6 +205,11 @@ ORDER_SAME_DISTANCE = 6
 ORDER_TITLE_ID_RE = r'(?=[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{8,}'
 CHECKOUT_NAME_MINUTES = 30       # 결제 화면의 상품명: 같은 쇼핑몰에서 이 시간 안에 본 마지막 상품 이름을 쓴다
 CONSOLE_TITLE = 'impulse-guard 감지 프로그램'   # 콘솔 창 제목. 맨 앞 창이 이 제목이면 자동 감지를 건너뛴다
+# 이 프로그램의 알림 창 제목 (popup.py). 맨 앞 창이면 캡처하지 않는다 (B-5: 팝업을 클릭하면 팝업만 캡처하던 문제)
+OWN_WINDOW_TITLES = ['충동구매 방지', '충동구매 알림', '쇼핑 차단 중']
+# 결제 화면인데 금액을 못 읽었고 같은 쇼핑몰의 최근 주문(금액 있음)이 있으면, 같은 주문인지 금액을 읽을 때까지
+# 이 시간만큼 팝업을 미룬다 (B-5. 지그재그는 '구매하기'마다 주문서 주소(탭 제목)가 새로 생겨 제목으로는 구분할 수 없다)
+CHECKOUT_AMOUNT_WAIT_SEC = 6
 # 로그 (desktop 폴더 기준, Git에 올리지 않음). 캡처 이미지는 어디에도 저장하지 않는다
 LOG_DIR = 'logs'
 LOG_FILE = 'detect.log'          # 감지 결과 한 줄씩 (1MB × 5개 순환)

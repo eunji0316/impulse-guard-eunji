@@ -2,12 +2,14 @@
 
 1. 같은 화면: 자동 감지 루프가 직전에 분석한 화면의 해시와 비교해 OCR을 건너뛴다 (auto_detect.py)
 2. 같은 주문 (RecentOrders): 결제 화면에서 기록과 팝업을 한 번만 한다
-   - 쇼핑몰이 다르거나 탭 제목이 다르면 다른 주문 (B-5. 지그재그는 제목이 주문서 주소라 주문마다 다르다)
-     제목 원문은 기억하지 않고 해시(title_key)만 메모리에서 비교한다. 로그와 파일에도 남기지 않는다
-   - 금액을 둘 다 읽었으면 금액이 같아야 같은 주문
-   - 금액을 한쪽이라도 모르면: 결제 화면에 계속 머무는 중(스크롤해서 맨 위 → 총 결제금액)이거나,
+   - 쇼핑몰이 다르면 다른 주문
+   - 금액을 둘 다 읽었으면 금액이 같아야 같은 주문 (탭 제목은 보지 않는다. 지그재그는 같은 장바구니라도
+     '구매하기'를 누를 때마다 주문서 주소(탭 제목)가 새로 생긴다)
+   - 금액을 한쪽이라도 모르면: 탭 제목이 다르면 다른 주문. 같거나 모르면 결제 화면에 계속 머무는 중(스크롤해서 맨 위 → 총 결제금액)이거나,
      제목에 주문서 번호가 있고 같거나, 화면 해시 거리가 config.ORDER_SAME_DISTANCE 이하일 때 같은 주문
    - 처음에 금액을 못 읽었다가 나중에 읽으면 같은 주문에 채운다 (Verdict.filled)
+     제목 원문은 기억하지 않고 해시(title_key)만 메모리에서 비교한다. 로그와 파일에도 남기지 않는다
+   - 보류 주문 (resolve): 금액을 모르는 새 주문을 금액을 읽은 뒤 최근 주문과 같은지 다시 판단한다 (main의 금액 확인 기다림)
    - 기준 시간은 '마지막으로 본 시각'부터 same_order_minutes (sliding window)
      · 결제 화면에 계속 머무르면 볼 때마다 시각이 갱신되어 다시 뜨지 않는다
      · 다른 창에 갔다가 기준 시간 안에 돌아오면 같은 시도로 본다 (revisit으로 기록만)
@@ -83,10 +85,10 @@ class RecentOrders:
     def _same(self, o, site, amount, frame_hash, title):
         if site and o.site and site != o.site:
             return False
-        if title is not None and o.title is not None and title.digest != o.title.digest:
-            return False                          # 탭 제목이 다르면 다른 주문
         if amount and o.amount:
             return o.site == site and o.amount == amount
+        if title is not None and o.title is not None and title.digest != o.title.digest:
+            return False                          # 금액을 모를 때 탭 제목이 다르면 다른 주문
         # 금액을 한쪽이라도 모른다
         if o is self.current:
             return True                           # 결제 화면에 계속 머무는 중 (스크롤해서 금액이 보이게 됨)
@@ -116,6 +118,36 @@ class RecentOrders:
         self.orders.append(o)
         self.current = o
         return Verdict(False, o)
+
+    def recent_known(self, site, exclude=None):
+        """같은 쇼핑몰에서 금액을 아는 최근 주문 (없으면 None)"""
+        self._expire(self.clock())
+        known = [o for o in self.orders if o is not exclude and o.amount and (not site or not o.site or o.site == site)]
+        return max(known, key=lambda o: o.last_seen) if known else None
+
+    def resolve(self, order, site, amount, frame_hash, title=None):
+        """금액을 몰라 보류했던 주문(order)의 금액을 읽었다. 같은 쇼핑몰+금액의 다른 주문이 있으면 그 주문으로 합치고
+        (order는 지운다) 중복, 없으면 order에 금액을 채우고 새 주문"""
+        now = self.clock()
+        self._expire(now)
+        amount = int(amount or 0)
+        for o in self.orders:
+            if o is not order and o.amount and o.amount == amount and (not site or not o.site or o.site == site):
+                if order in self.orders:
+                    self.orders.remove(order)
+                away = now - o.last_seen
+                o.last_seen, o.count, o.frame_hash = now, o.count + 1, frame_hash
+                if title is not None:
+                    o.title = title
+                self.current = o
+                return Verdict(True, o, 'revisit', away)
+        order.amount, order.frame_hash, order.last_seen = amount, frame_hash, now
+        if title is not None:
+            order.title = title
+        if order not in self.orders:
+            self.orders.append(order)
+        self.current = order
+        return Verdict(False, order, filled=True)
 
     def fill(self, order, site, amount, frame_hash, title=None):
         """'결제 금액 확인 중' 팝업이 떠 있는 동안 읽은 금액을 그 주문에 채운다 (B-5). 같은 주문으로 볼 수 없으면 False
