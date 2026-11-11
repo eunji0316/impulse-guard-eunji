@@ -25,7 +25,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import capture, config, frame, ocr, popup_model
+from . import capture, config, frame, ocr, popup_model, timing
 from .dedup import NoticeGate, RecentOrders
 from .detect_log import DetectLog, NullLog
 from .detector import page as page_info, price, shopping, stage as stage_mod
@@ -79,6 +79,18 @@ def analyze_boxes(boxes, img=None, reread=None, site_hints=None):
 def analyze_image(img, site_hints=None):
     """이미지 한 장을 OCR부터 분석한다"""
     return analyze_boxes(ocr.read(img), img, reread=ocr.read_struck, site_hints=site_hints)
+
+
+def timed_analysis(fn, *args):
+    """분석 함수를 부르고 걸린 시간을 돌려준다. 측정 중이면 OCR/다시 읽기를 뺀 나머지를 '판정'으로 더한다"""
+    t = timing.current()
+    before = (t.sec.get('ocr', 0.0) + t.sec.get('reread', 0.0)) if t else 0.0
+    started = timing.now()
+    a = fn(*args)
+    sec = timing.now() - started
+    if t:
+        t.add('judge', sec - (t.sec.get('ocr', 0.0) + t.sec.get('reread', 0.0) - before))
+    return a, sec
 
 
 def _won(v):
@@ -196,6 +208,7 @@ class App:
         self.last_product = {}            # 쇼핑몰 → (상품명, 금액, 본 시각). 결제 화면의 상품명으로 쓴다
         self.last_frame_hash = None       # F4가 마지막으로 분석한 화면. 자동 감지는 이 화면을 다시 OCR하지 않는다
         self.was_shopping = False         # 자동 감지가 직전에 분석한 화면이 쇼핑 화면이었는지
+        self._pending_timing = None       # 팝업을 요청한 회차의 시간 측정. 창이 만들어지면 로그에 남긴다
 
     # ── F4 ─────────────────────────────────────────────────
     def on_hotkey(self):
@@ -207,8 +220,13 @@ class App:
         threading.Thread(target=self.work, daemon=True).start()
 
     def _capture_and_analyze(self):
-        img = capture.grab_screen()
-        h = frame.dhash(img)
+        with timing.measure('capture'):
+            img = capture.grab_screen()
+        with timing.measure('hash'):
+            h = frame.dhash(img)
+        t = timing.current()
+        if t is not None:
+            t.info['화면'] = f'{img.shape[1]}x{img.shape[0]}'
         a = analyze_image(img, self.client.site_hints())
         del img                           # 캡처 이미지는 저장하지 않고 바로 버린다
         a.frame_hash = h
@@ -222,12 +240,16 @@ class App:
 
     def work(self):
         """F4 작업 스레드: 분석과 서버 요청. 창을 띄울 일이 있으면 main 스레드에 넘긴다"""
+        with timing.active(timing.Timing('f4')) as t:
+            shown = self._work()
+            if not shown:
+                self._log_timing(t)
+
+    def _work(self):
         shown = False
         try:
             self._prepare()
-            started = time.perf_counter()
-            a = self.analyze()
-            ocr_sec = time.perf_counter() - started
+            a, ocr_sec = timed_analysis(self.analyze)
             print_result(a)
             r = send_and_print(self.client, a)
             if r is not None and r.offline:
@@ -249,13 +271,28 @@ class App:
             self.log.event('f4', a, action=plan[0] if plan else '', ocr_sec=ocr_sec, note=self._popup_note(plan, note))
             if plan:
                 site = a.page.site if a.page else ''
-                self.ui.post(lambda: self.show(*plan, actions=actions, site=site, source='f4'))
+                self._post(lambda: self.show(*plan, actions=actions, site=site, source='f4'))
                 shown = True
         except Exception as e:
             print(f"!!! 분석 중 오류가 발생했습니다: {e}")
         finally:
             if not shown:
                 self._busy.release()
+        return shown
+
+    # ── 시간 측정 (timing.py) ──────────────────────────────
+    def _post(self, fn):
+        """창 띄우기를 main 스레드에 넘긴다. 측정 중이면 요청 시각을 기억해 창이 만들어진 뒤 로그에 남긴다"""
+        t = timing.current()
+        if t is not None:
+            t.post_at = timing.now()
+            self._pending_timing = t
+        self.ui.post(fn)
+
+    def _log_timing(self, t):
+        if t is not None:
+            t.finish()
+            self.log.info(t.line(), console=False)
 
     # ── 자동 감지 (auto_detect.AutoDetector가 부른다) ────────
     def paused(self):
@@ -274,14 +311,14 @@ class App:
         shown = False
         try:
             self._prepare()
-            started = time.perf_counter()
-            a = self.analyze_frame(img)
-            shown = self.handle_auto(a, frame_hash, time.perf_counter() - started)
+            a, ocr_sec = timed_analysis(self.analyze_frame, img)
+            shown = self.handle_auto(a, frame_hash, ocr_sec)
         except Exception as e:
             print(f"!!! 자동 감지 분석 중 오류가 발생했습니다: {e}")
         finally:
             if not shown:
                 self._busy.release()
+                self._log_timing(timing.current())    # 창을 띄우면 창이 만들어진 뒤 show()에서 남긴다
         return shown
 
     def handle_auto(self, a, frame_hash, ocr_sec=None):
@@ -308,7 +345,7 @@ class App:
             plan = popup_model.build(a, r, self.client.block_remain())
             if plan and plan[0] == 'blocked':
                 self.log.event('auto', a, action='blocked', ocr_sec=ocr_sec, note=self._server_note(r))
-                self.ui.post(lambda: self.show(*plan, site=site))
+                self._post(lambda: self.show(*plan, site=site))
                 return True
             if r.offline:
                 self.log.event('auto', a, ocr_sec=ocr_sec, note='서버 연결 안 됨: 알림 창 없음')
@@ -349,10 +386,10 @@ class App:
             actions = popup_model.Actions(self.client, view,
                                           on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
             self.log.event('auto', a, action='popup', ocr_sec=ocr_sec, note=self._popup_note(plan, self._server_note(r)))
-            self.ui.post(lambda: self.show(kind, view, actions=actions, site=site))
+            self._post(lambda: self.show(kind, view, actions=actions, site=site))
         else:
             self.log.event('auto', a, action='blocked', ocr_sec=ocr_sec, note=self._server_note(r))
-            self.ui.post(lambda: self.show(kind, view, site=site))
+            self._post(lambda: self.show(kind, view, site=site))
         return True
 
     def _item_name(self, a):
@@ -397,6 +434,7 @@ class App:
         source: f4면 포커스를 가져오고, auto면 가져가지 않고 작업 표시줄만 깜빡인다 (popup.py 맨 위 설명)"""
         from . import popup
         take_focus = source == 'f4'
+        t, self._pending_timing = self._pending_timing, None
         try:
             if kind == 'blocked':
                 def closed():
@@ -410,6 +448,10 @@ class App:
         except Exception:
             self._closed()
             raise
+        finally:
+            if t is not None and getattr(t, 'post_at', None) is not None:
+                t.add('popup', timing.now() - t.post_at)
+                self._log_timing(t)
 
     def _closed(self):
         self.window = None

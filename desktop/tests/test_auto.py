@@ -19,7 +19,7 @@ import unittest
 
 import cache
 import checkout_samples as cs
-from impulse_guard import auto_detect, config, main, popup, popup_model, server_client
+from impulse_guard import auto_detect, config, main, popup, popup_model, server_client, timing
 from impulse_guard.capture import Frame
 from impulse_guard.detect_log import DetectLog, mask_private
 from test_popup import TkCase
@@ -50,6 +50,7 @@ class FakeApp:
         self.busy = False
         self.same = 0
         self.runs = []
+        self.timings = []
         self.run_delay = 0.0
 
     def paused(self):
@@ -63,6 +64,7 @@ class FakeApp:
 
     def run_auto(self, img, h):
         self.runs.append(h)
+        self.timings.append(timing.current())
         time.sleep(self.run_delay)
 
 
@@ -100,6 +102,19 @@ class TestAutoDetectorTick(unittest.TestCase):
         d, app = self.detector(Script(H1, H2, H3, H3))
         self.assertEqual([d.tick() for _ in range(4)], ['changing', 'changing', 'changing', 'analyzed'])
         self.assertEqual(app.runs, [H3])
+
+    def test_timing_passed_to_analysis(self):
+        """B-5: 분석 회차에 기다린 시간(간격, 멈춤 확인)과 캡처/해시 시간이 담긴 측정이 넘어간다"""
+        d, app = self.detector(Script(H1, H1, H1, H2, H3, H3))
+        self.assertEqual([d.tick() for _ in range(6)], ['changing', 'analyzed', 'same', 'changing', 'changing', 'analyzed'])
+        t = app.timings[-1]
+        self.assertIsInstance(t, timing.Timing)
+        self.assertEqual(t.changing, 2)                  # H2, H3에서 바뀌는 중
+        for key in ('interval_wait', 'settle_wait', 'capture', 'hash'):
+            self.assertIn(key, t.sec)
+        self.assertIsNotNone(t.detected_at)
+        self.assertIsNone(d.change_at)                   # 분석한 뒤에는 지운다
+        self.assertIsNone(timing.current())              # 측정은 분석하는 동안만
 
     def test_new_screen_after_analysis(self):
         d, app = self.detector(Script(H1, H1, H2, H2))
@@ -277,9 +292,11 @@ class TestHandleAuto(TkCase):
             app.window.destroy()
             self.pump(lambda: app.window is None)
 
-    def log_lines(self):
+    def log_lines(self, timing_lines=False):
+        """감지 결과 줄 (timing_lines=True면 B-5 시간 측정 줄만)"""
         with open(os.path.join(self.dir, config.LOG_FILE), encoding='utf-8') as f:
-            return f.read().splitlines()
+            lines = f.read().splitlines()
+        return [line for line in lines if (' INFO timing ' in line) == timing_lines]
 
     def test_product_screen_no_server_call(self):
         app = self.make_app()
@@ -468,6 +485,40 @@ class TestHandleAuto(TkCase):
         with quiet():
             app.run_auto(object(), H1)
         self.assertFalse(app.paused())
+
+    # ── 시간 측정 (B-5) ──
+    def run_timed(self, app, t):
+        self.assertTrue(app.try_begin())
+        with timing.active(t):
+            return app.run_auto(object(), H1)
+
+    def test_timing_line_without_popup(self):
+        """팝업이 없으면 분석이 끝날 때 한 줄. 화면 글자나 이미지는 남기지 않는다"""
+        app = self.make_app()
+        app.analyze_frame = lambda img: self.product
+        self.assertFalse(self.run_timed(app, timing.Timing('auto')))
+        line = self.log_lines(timing_lines=True)[-1]
+        self.assertIn('timing auto | 판정 ', line)
+        self.assertIn('| 전체 ', line)
+        self.assertNotIn('coupang', line)
+
+    def test_timing_line_after_popup_shown(self):
+        """결제 화면 팝업: 서버 시간(action별), 팝업 표시, 감지→팝업이 창이 만들어진 뒤 한 줄로 남는다"""
+        app = self.make_app(check=(200, CHECKOUT_RESULT))
+        app.analyze_frame = lambda img: self.checkout
+        t = timing.Timing('auto')
+        t.detected_at = timing.now() - 2.0
+        t.add('interval_wait', 3.0)
+        t.add('settle_wait', 2.0)
+        t.changing = 1
+        self.assertTrue(self.run_timed(app, t))
+        self.assertTrue(self.pump(lambda: app.window is not None))
+        line = self.log_lines(timing_lines=True)[-1]
+        for part in ('간격 대기 ≤3.00', '멈춤 확인 2.00 (바뀌는 중 1회)', '판정 ', '서버 ', 'check ', '팝업 표시 ',
+                     '감지→팝업 ', '화면 바뀜→팝업 ≤'):
+            self.assertIn(part, line)
+        self.assertGreaterEqual(t.total, 2.0)
+        self.close_window(app)
 
 
 # ── 로그와 개인정보 ─────────────────────────────────────────────

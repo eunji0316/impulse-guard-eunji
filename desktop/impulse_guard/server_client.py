@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
-from . import config
+from . import config, timing
 
 DESKTOP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -124,7 +124,8 @@ class Client:
             return ApiResult(False, msg=self.last_error or '토큰이 없습니다', offline=True)
         body = {'client': config.CLIENT_NAME, 'action': action, **data}
         try:
-            status, resp = self.transport(self.server + config.API_PATH, body, self.token, self.timeout)
+            with timing.measure_server(action):
+                status, resp = self.transport(self.server + config.API_PATH, body, self.token, self.timeout)
         except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, OSError, ValueError) as e:
             reason = getattr(e, 'reason', e)
             msg = '응답 시간 초과' if isinstance(reason, (socket.timeout, TimeoutError)) else f'연결 실패: {reason}'
