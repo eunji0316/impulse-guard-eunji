@@ -111,6 +111,7 @@ if ($action === 'setting') {
         'is_blocking'  => $blocking,
         'block_until'  => $blocking ? $st['st_block_until'] : null,
         'block_remain' => $blocking ? max(0, strtotime($st['st_block_until']) - G5_SERVER_TIME) : 0,   // 남은 초. PC 시계와 상관없이 이 값으로 종료 시각을 계산한다
+        'block_all'    => (bool)$st['st_block_all'],   // 쇼핑몰 전체 차단. true면 sites의 on과 상관없이 모든 쇼핑 화면을 차단
         'sites'        => $sites,
         'keywords'     => $st['st_keywords'],
         'risk_alert'   => (bool)$st['st_risk_alert']
@@ -130,7 +131,7 @@ if ($action === 'check') {
 
     $st       = ipp_setting_get($mb_id);
     $reasons  = ipp_impulse_reasons($price, 'shopping', G5_TIME_YMDHIS, $item_name, $mb_id);   // 차단 사이트는 모두 쇼핑몰
-    $blocking = ipp_is_blocking($mb_id, $site);   // site가 ''면 사이트 목록과 상관없이 차단 시간인지만 본다
+    $blocking = ipp_is_blocking($mb_id, $site);   // 전체 차단이 켜져 있거나 site가 ''면 차단 시간인지만, 아니면 사이트 목록도 본다
     $result   = array(
         'is_blocking' => $blocking,
         'is_impulse'  => $reasons ? 1 : 0,

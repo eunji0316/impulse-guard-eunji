@@ -25,6 +25,13 @@ if ($action === 'save') {
     ipp_json(true, array('sites' => $st['st_sites'], 'keywords' => $st['st_keywords']));
 }
 
+// 쇼핑몰 전체 차단 토글 (on: 1 켬, 0 끔)
+if ($action === 'block_all') {
+    ipp_setting_set_block_all($mb_id, !empty($_POST['on']));
+    $st = ipp_setting_get($mb_id);
+    ipp_json(true, array('block_all' => (bool)$st['st_block_all']));
+}
+
 // 차단 시작
 if ($action === 'block') {
     $preset = isset($_POST['preset']) ? $_POST['preset'] : '';

@@ -418,10 +418,11 @@
 </div>`;
 
   // 설정 응답에서 이 사이트의 차단 종료 시각(ms). 차단 중이 아니거나 사이트가 꺼져 있으면 0
+  // 쇼핑몰 전체 차단(block_all)이 켜져 있으면 사이트 on과 상관없이 차단한다
   function blockUntil(res, code) {
     if (!res.ok || !res.data.is_blocking) return 0;
     const site = (res.data.sites || []).find((s) => s.code === code);
-    return (site && site.on && res.data.block_until_ms > Date.now()) ? res.data.block_until_ms : 0;
+    return (site && (res.data.block_all || site.on) && res.data.block_until_ms > Date.now()) ? res.data.block_until_ms : 0;
   }
 
   // 1시간 2분 3초 / 2일 3시간 4분 5초
