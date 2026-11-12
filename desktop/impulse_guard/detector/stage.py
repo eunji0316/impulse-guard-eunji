@@ -13,6 +13,12 @@ from dataclasses import dataclass, field
 from .. import config
 
 NONE, PRODUCT, CHECKOUT = 'none', 'product', 'checkout'
+
+
+def is_checkout_title(title):
+    """창 제목(브라우저 탭 제목)이 결제 페이지 같으면 True (B-5). 자동 감지의 대기 시간만 줄이고 판정에는 쓰지 않는다"""
+    t = (title or '').lower()
+    return any(w.lower() in t for w in config.CHECKOUT_TITLE_WORDS)
 LABELS = {NONE: '쇼핑 아님', PRODUCT: '상품 화면', CHECKOUT: '결제 화면'}
 
 

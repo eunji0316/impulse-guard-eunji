@@ -26,6 +26,7 @@ import webbrowser
 from tkinter import font as tkfont
 
 from . import config
+from . import popup_model
 from .popup_model import NO_PRICE_TEXT, Outcome, hms
 
 C = config.POPUP_COLORS
@@ -122,8 +123,24 @@ class UiHost:
         self.root.after_cancel(self._after)
 
 
+def work_area(win=None):
+    """주 모니터 작업 영역 (left, top, right, bottom). 작업 표시줄을 뺀 영역. 못 구하면 화면 전체"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        rect = wintypes.RECT()
+        SPI_GETWORKAREA = 0x0030
+        if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0):
+            return rect.left, rect.top, rect.right, rect.bottom
+    except Exception:
+        pass
+    if win is not None:
+        return 0, 0, win.winfo_screenwidth(), win.winfo_screenheight()
+    return 0, 0, 1920, 1080
+
+
 class _Window:
-    """두 창의 공통: 항상 위, 주 모니터 위쪽 가운데, 흰 카드"""
+    """두 창의 공통: 항상 위, 주 모니터 오른쪽 아래, 흰 카드"""
 
     title = '충동구매 방지'
 
@@ -132,6 +149,7 @@ class _Window:
         self.on_closed = on_closed
         self.take_focus = take_focus
         self.closed = False
+        self.screen_rect = None                 # (x0, y0, x1, y1) 화면 좌표. place()가 정한다
         self.opened_at = time.monotonic()
         self._afters = {}                       # 이름 → after 예약 번호 (창을 닫을 때 모두 취소)
         self.width = host.px(config.POPUP_WIDTH)
@@ -212,21 +230,48 @@ class _Window:
         lb.pack(fill='x', pady=(self.host.px(12), 0))
         return lb
 
+    def position(self, h):
+        """창 왼쪽 위 좌표: 주 모니터 작업 영역(작업 표시줄 제외)의 오른쪽 아래"""
+        left, top, right, bottom = work_area(self.win)
+        m, bar = self.host.px(config.POPUP_EDGE_MARGIN), self.host.px(config.POPUP_TITLEBAR)
+        x = max(left, right - self.width - m)
+        y = max(top, bottom - h - bar - m)
+        return x, y
+
     def place(self):
-        """주 모니터 위쪽 가운데에 놓고 앞으로 가져온다. 내용이 바뀌면 다시 부른다"""
+        """주 모니터 오른쪽 아래에 놓고 앞으로 가져온다. 내용이 바뀌면 다시 부른다"""
         self.win.update_idletasks()
         h = self.win.winfo_reqheight()
-        x = (self.win.winfo_screenwidth() - self.width) // 2
-        y = self.host.px(config.POPUP_TOP_MARGIN)
+        x, y = self.position(h)
         self.win.geometry(f'{self.width}x{h}+{x}+{y}')
         self.win.deiconify()
         self.win.lift()
         self.win.attributes('-topmost', True)
+        self._remember_rect()
         if not self.take_focus:
             self.flash()
             return
         try:
             self.win.focus_force()
+        except tk.TclError:
+            pass
+
+    def resize(self):
+        """내용이 바뀐 뒤 높이를 맞춘다. 아래쪽 끝은 그대로 두고 위로 늘어난다 (포커스는 그대로)"""
+        self.win.update_idletasks()
+        h = self.win.winfo_reqheight()
+        x, y = self.position(h)
+        self.win.geometry(f'{self.width}x{h}+{x}+{y}')
+        self._remember_rect()
+
+    def _remember_rect(self):
+        """main 스레드: 화면에서 창이 차지하는 영역 (제목 표시줄과 그림자 여유 포함). 자동 감지가 이 영역을 빼고 OCR한다"""
+        try:
+            self.win.update_idletasks()
+            m = self.host.px(config.POPUP_MASK_MARGIN)
+            x, y = self.win.winfo_rootx(), self.win.winfo_rooty()
+            self.screen_rect = (x - m, y - m - self.host.px(config.POPUP_TITLEBAR), x + self.win.winfo_width() + m,
+                                y + self.win.winfo_height() + m)
         except tk.TclError:
             pass
 
@@ -257,6 +302,7 @@ class ImpulsePopup(_Window):
         self.link_url = link_url
         self.busy = False
         self.done = False
+        self.applied_seq = 0                    # 마지막으로 반영한 분석 회차 번호 (fill_price)
         px = host.px
 
         # ── 묻는 화면 ──
@@ -279,7 +325,7 @@ class ImpulsePopup(_Window):
                 self.label(row, view.rate_text, 15, True, fg=C['danger'], bg=C['item']).pack(side='left', padx=(0, px(6)))
             self.price_label = self.label(row, view.price_text, 15, True, bg=C['item'])
         else:
-            self.price_label = self.label(row, NO_PRICE_TEXT, 12, True, fg=C['sub'], bg=C['item'])
+            self.price_label = self.label(row, view.price_text or NO_PRICE_TEXT, 12, True, fg=C['sub'], bg=C['item'])
         self.price_label.pack(side='left')
         if view.orig_text:
             self.label(row, view.orig_text, 10, fg=C['sub'], bg=C['item'],
@@ -289,6 +335,7 @@ class ImpulsePopup(_Window):
         for text in view.reasons:
             lb = self.label(self.ask, '• ' + text, 10, fg=C['danger'], wraplength=self.wrap)
             lb.pack(fill='x', pady=(px(10) if not self.reason_labels else px(2), 0))
+            lb.reason = text
             self.reason_labels.append(lb)
         self.point_label = self.label(self.ask, view.point_text, 10, True, fg=C['point'], wraplength=self.wrap)
         self.point_label.pack(fill='x', pady=(px(10), 0))
@@ -310,6 +357,26 @@ class ImpulsePopup(_Window):
         self.timemachine_link = None
 
         self.place()
+
+    # ── 결제 금액 채우기 (B-5) ──
+    def fill_price(self, price, seq=None):
+        """main 스레드: '결제 금액 확인 중' 팝업에 읽은 금액을 채운다. 채웠으면 True
+        상태는 '확인 중 → 금액'으로만 바뀐다 (view.pending일 때만). seq(분석 회차 번호)가 이미 반영한 회차보다
+        오래됐으면 무시한다 (늦게 도착한 결과가 최신 결과를 덮어쓰지 않게)"""
+        if seq is not None:
+            if seq <= self.applied_seq:
+                return False
+            self.applied_seq = seq
+        if self.closed or self.done or self.busy or not popup_model.fill_price(self.view, price):
+            return False
+        self.price_label.configure(text=self.view.price_text, font=self.host.font(15, True), fg=C['text'])
+        for lb in [lb for lb in self.reason_labels if getattr(lb, 'reason', '') == popup_model.CHECKOUT_PENDING_REASON]:
+            lb.destroy()
+            self.reason_labels.remove(lb)
+        self.point_label.configure(text=self.view.point_text)
+        self._set_busy(False)
+        self.resize()
+        return True
 
     # ── 버튼 ──
     def _set_busy(self, on):

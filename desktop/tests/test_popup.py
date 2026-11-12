@@ -14,6 +14,7 @@ import tkinter as tk
 import unittest
 
 import cache
+import checkout_samples as cs
 from impulse_guard import config, main, popup, popup_model
 from impulse_guard.popup_model import Actions, BlockedView, ImpulseView, Outcome
 from impulse_guard.server_client import ApiResult
@@ -85,6 +86,26 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(v.reasons, [popup_model.NO_PRICE_REASON])
         self.assertFalse(v.can_hold)
         self.assertIn('가격을 읽지 못해', v.point_text)
+
+    def test_checkout_pending_price(self):
+        """결제 화면인데 금액을 못 읽으면 '결제 금액 확인 중'. 나중에 fill_price로 채우면 담아두기를 켠다"""
+        a = main.analyze_boxes(cs.COUPANG_CHECKOUT)
+        a = dataclasses.replace(a, page=dataclasses.replace(a.page, checkout_total=None, total_label=''))
+        kind, v = popup_model.build(a, ApiResult(True, {**IMPULSE, 'reasons': [{'code': 'checkout', 'text': '결제 직전'}]}))
+        self.assertEqual((kind, v.price, v.price_text, v.pending, v.can_hold),
+                         ('impulse', 0, popup_model.CHECKOUT_PENDING_TEXT, True, False))
+        self.assertEqual(v.reasons, ['결제 직전', popup_model.CHECKOUT_PENDING_REASON])
+        self.assertEqual(v.point_text, popup_model.CHECKOUT_PENDING_POINT)
+        self.assertTrue(popup_model.fill_price(v, 85400))
+        self.assertEqual((v.price, v.price_text, v.pending, v.can_hold), (85400, '85,400원', False, True))
+        self.assertEqual(v.reasons, ['결제 직전'])
+        self.assertEqual(v.point_text, popup_model.FILLED_POINT_TEXT)
+        self.assertFalse(popup_model.fill_price(v, 90000))      # 한 번 채우면 다시 바꾸지 않는다
+
+    def test_product_no_price_is_not_pending(self):
+        _, v = popup_model.build(no_price(self.a), ApiResult(True, IMPULSE))
+        self.assertFalse(v.pending)
+        self.assertFalse(popup_model.fill_price(v, 1000))
 
     def test_no_price_keeps_server_reason(self):
         d = {**IMPULSE, 'reasons': [REASONS[2]]}
@@ -256,9 +277,22 @@ class TestImpulsePopup(TkCase):
         self.assertEqual(p.hold_btn['bg'], config.POPUP_COLORS['primary'])
         self.assertEqual(p.giveup_btn['bg'], config.POPUP_COLORS['secondary'])
         self.assertEqual(tk.font.Font(font=p.buy_link['font']).actual('underline'), 1)
-        self.assertLessEqual(p.win.winfo_y(), self.host.px(config.POPUP_TOP_MARGIN) + 40)    # 화면 위쪽
+        left, top, right, bottom = popup.work_area(p.win)                  # 작업 영역 오른쪽 아래
+        self.root.update()
+        self.assertGreaterEqual(p.win.winfo_rootx() + p.win.winfo_width(), right - self.host.px(80))
+        self.assertLessEqual(p.win.winfo_rooty() + p.win.winfo_height(), bottom)
+        self.assertGreaterEqual(p.win.winfo_rooty() + p.win.winfo_height(), bottom - self.host.px(120))
         p.destroy()
 
+
+    def test_blocked_notice_bottom_right(self):
+        """차단 안내 창도 같은 오른쪽 아래"""
+        w = popup.BlockedNotice(self.host, BlockedView(90, '겨울 패딩'), take_focus=False)
+        self.root.update()
+        left, top, right, bottom = popup.work_area(w.win)
+        self.assertGreaterEqual(w.win.winfo_rootx() + w.win.winfo_width(), right - self.host.px(80))
+        self.assertLessEqual(w.win.winfo_rooty() + w.win.winfo_height(), bottom)
+        w.destroy()
     def test_hold_shows_result(self):
         out = Outcome('타임머신에 담았어요', '2026-11-12 08:30까지 참으면 +992P를 받아요.', show_link=True)
         p, act = self.open(actions=FakeActions(delay=0.2, hold=out))

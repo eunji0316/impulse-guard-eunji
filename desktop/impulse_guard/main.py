@@ -25,8 +25,8 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import capture, config, frame, ocr, popup_model
-from .dedup import NoticeGate, RecentOrders
+from . import capture, config, frame, ocr, popup_model, timing
+from .dedup import NoticeGate, RecentOrders, title_key
 from .detect_log import DetectLog, NullLog
 from .detector import page as page_info, price, shopping, stage as stage_mod
 from .popup_model import hms as _hms
@@ -41,6 +41,7 @@ class Analysis:
     boxes: list = None
     stage: stage_mod.StageResult = None
     frame_hash: int = None       # 분석한 화면의 해시 (F4 캡처, 같은 주문 판단에 쓴다)
+    title_key: object = None     # 캡처할 때 맨 앞 창 제목의 해시 (dedup.title_key). 제목 원문은 두지 않는다
 
     @property
     def is_shopping(self):
@@ -76,9 +77,89 @@ def analyze_boxes(boxes, img=None, reread=None, site_hints=None):
     return Analysis(shop, prices, info, boxes, st)
 
 
+@dataclass
+class AmountWait:
+    """금액을 몰라 팝업을 미룬 결제 화면 (같은 쇼핑몰의 최근 주문과 같은 주문인지 금액을 읽을 때까지)"""
+    order: object                # dedup.SeenOrder (금액 모름)
+    since: float                 # 미루기 시작한 시각 (App.clock)
+    analysis: object             # 시간이 지나면 이 분석 결과로 '확인 중' 팝업을 띄운다
+
+
+@dataclass
+class PendingAmount:
+    """결제 금액 확인 중인 팝업과 그 주문"""
+    order: object                # dedup.SeenOrder
+    window: object               # popup.ImpulsePopup
+    site: str = ''
+
+
+def covered_box(rect, origin, shape):
+    """화면 좌표 rect가 캡처 이미지(왼쪽 위 origin, 크기 shape)에서 차지하는 영역 (x0, y0, x1, y1). 안 겹치면 None"""
+    if not rect:
+        return None
+    ox, oy = origin
+    h, w = shape[:2]
+    x0, y0 = max(0, int(rect[0] - ox)), max(0, int(rect[1] - oy))
+    x1, y1 = min(w, int(rect[2] - ox)), min(h, int(rect[3] - oy))
+    return (x0, y0, x1, y1) if x0 < x1 and y0 < y1 else None
+
+
+def mask_rect(img, rect, origin=(0, 0)):
+    """화면 좌표 rect(x0, y0, x1, y1) 영역을 흰색으로 지운다 (팝업 자기 글자를 읽지 않게). img를 바로 고친다"""
+    box = covered_box(rect, origin, img.shape)
+    if box:
+        x0, y0, x1, y1 = box
+        img[y0:y1, x0:x1] = 255
+    return img
+
+
+@dataclass
+class OcrEngine:
+    name: str                 # 로그와 콘솔용 ('Windows OCR', 'EasyOCR')
+    read: object              # 이미지 → OcrBox 목록
+    reread: object            # 취소선 구간 다시 읽기
+    note: str = ''            # 원하는 엔진을 못 쓴 이유 (EasyOCR로 바꿨을 때)
+
+
+_engine = None
+
+
+def ocr_engine():
+    """쓸 OCR 엔진 (처음 한 번 정한다). config.OCR_ENGINE이 'win'이고 한국어 Windows OCR이 있으면 Windows OCR,
+    아니면 EasyOCR (원본과 같은 설정)"""
+    global _engine
+    if _engine is None:
+        note = ''
+        if config.OCR_ENGINE == 'win':
+            from . import winocr
+            if winocr.available():
+                _engine = OcrEngine('Windows OCR', winocr.read, winocr.read_struck)
+            else:
+                note = 'Windows OCR(한국어)을 쓸 수 없어 EasyOCR을 씁니다'
+        if _engine is None:
+            _engine = OcrEngine('EasyOCR', ocr.read, ocr.read_struck, note)
+    return _engine
+
+
 def analyze_image(img, site_hints=None):
     """이미지 한 장을 OCR부터 분석한다"""
-    return analyze_boxes(ocr.read(img), img, reread=ocr.read_struck, site_hints=site_hints)
+    eng = ocr_engine()
+    t = timing.current()
+    if t is not None:
+        t.info['엔진'] = eng.name
+    return analyze_boxes(eng.read(img), img, reread=eng.reread, site_hints=site_hints)
+
+
+def timed_analysis(fn, *args):
+    """분석 함수를 부르고 걸린 시간을 돌려준다. 측정 중이면 OCR/다시 읽기를 뺀 나머지를 '판정'으로 더한다"""
+    t = timing.current()
+    before = (t.sec.get('ocr', 0.0) + t.sec.get('reread', 0.0)) if t else 0.0
+    started = timing.now()
+    a = fn(*args)
+    sec = timing.now() - started
+    if t:
+        t.add('judge', sec - (t.sec.get('ocr', 0.0) + t.sec.get('reread', 0.0) - before))
+    return a, sec
 
 
 def _won(v):
@@ -196,6 +277,10 @@ class App:
         self.last_product = {}            # 쇼핑몰 → (상품명, 금액, 본 시각). 결제 화면의 상품명으로 쓴다
         self.last_frame_hash = None       # F4가 마지막으로 분석한 화면. 자동 감지는 이 화면을 다시 OCR하지 않는다
         self.was_shopping = False         # 자동 감지가 직전에 분석한 화면이 쇼핑 화면이었는지
+        self._pending_timing = None       # 팝업을 요청한 회차의 시간 측정. 창이 만들어지면 로그에 남긴다
+        self.pending = None               # 결제 금액 확인 중인 팝업 (PendingAmount). 떠 있는 동안 금액을 읽어 채운다
+        self.waiting = None               # 금액을 몰라 팝업을 미룬 결제 화면 (AmountWait)
+        self.round = 0                    # 분석 회차 번호 (오래된 결과를 거르고 로그에 남긴다)
 
     # ── F4 ─────────────────────────────────────────────────
     def on_hotkey(self):
@@ -207,11 +292,19 @@ class App:
         threading.Thread(target=self.work, daemon=True).start()
 
     def _capture_and_analyze(self):
-        img = capture.grab_screen()
-        h = frame.dhash(img)
+        with timing.measure('capture'):
+            fr = capture.grab_for_detect()       # 자동 감지와 같이 맨 앞 창 영역 (F4를 누른 창)
+        key = title_key(fr.foreground_title)
+        img, fr.img = fr.img, None
+        with timing.measure('hash'):
+            h = frame.dhash(img)
+        t = timing.current()
+        if t is not None:
+            t.info['화면'] = f'{img.shape[1]}x{img.shape[0]}'
         a = analyze_image(img, self.client.site_hints())
         del img                           # 캡처 이미지는 저장하지 않고 바로 버린다
         a.frame_hash = h
+        a.title_key = key
         return a
 
     def _prepare(self):
@@ -222,12 +315,16 @@ class App:
 
     def work(self):
         """F4 작업 스레드: 분석과 서버 요청. 창을 띄울 일이 있으면 main 스레드에 넘긴다"""
+        with timing.active(timing.Timing('f4')) as t:
+            shown = self._work()
+            if not shown:
+                self._log_timing(t)
+
+    def _work(self):
         shown = False
         try:
             self._prepare()
-            started = time.perf_counter()
-            a = self.analyze()
-            ocr_sec = time.perf_counter() - started
+            a, ocr_sec = timed_analysis(self.analyze)
             print_result(a)
             r = send_and_print(self.client, a)
             if r is not None and r.offline:
@@ -235,12 +332,13 @@ class App:
             plan = popup_model.build(a, r, self.client.block_remain())
             if a.frame_hash is not None:
                 self.last_frame_hash = a.frame_hash
-            actions = None
+            actions = order = None
             if a.is_checkout and plan and plan[0] == 'impulse':
                 # F4로 띄운 결제 화면 팝업도 같은 주문으로 기억한다 (자동 감지가 같은 주문에 팝업을 또 띄우지 않게)
                 site = a.page.site if a.page else ''
-                order = self.orders.see(site, a.amount, a.frame_hash).order
+                order = self.orders.see(site, a.amount, a.frame_hash, a.title_key).order
                 view = plan[1]
+                self._link_record(order, view.bl_id, a.amount)
                 actions = popup_model.Actions(self.client, view,
                                               on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
             elif not a.is_checkout:
@@ -249,13 +347,74 @@ class App:
             self.log.event('f4', a, action=plan[0] if plan else '', ocr_sec=ocr_sec, note=self._popup_note(plan, note))
             if plan:
                 site = a.page.site if a.page else ''
-                self.ui.post(lambda: self.show(*plan, actions=actions, site=site, source='f4'))
+                order = order if actions is not None else None
+                self._post(lambda: self.show(*plan, actions=actions, site=site, source='f4', order=order))
                 shown = True
         except Exception as e:
             print(f"!!! 분석 중 오류가 발생했습니다: {e}")
         finally:
             if not shown:
                 self._busy.release()
+        return shown
+
+    # ── 시간 측정 (timing.py) ──────────────────────────────
+    def _post(self, fn):
+        """창 띄우기를 main 스레드에 넘긴다. 측정 중이면 요청 시각을 기억해 창이 만들어진 뒤 로그에 남긴다"""
+        t = timing.current()
+        if t is not None:
+            t.post_at = timing.now()
+            self._pending_timing = t
+        self.ui.post(fn)
+
+    def _log_timing(self, t):
+        if t is not None:
+            t.finish()
+            self.log.info(t.line(), console=False)
+
+    # ── 결제 금액 확인 중 팝업 (B-5) ────────────────────────
+    def wants_amount(self):
+        """'결제 금액 확인 중' 팝업이 떠 있고 아직 결정 전이면 True. 자동 감지가 쉬지 않고 금액만 읽는다"""
+        p = self.pending
+        w = p.window if p else None
+        return bool(w and w.view.pending and not w.closed and not w.done and not w.busy)
+
+    def run_amount(self, img, frame_hash, title=None, origin=None):
+        """자동 감지 스레드: 팝업이 떠 있는 동안의 회차. 팝업 영역을 지우고 OCR해서 같은 주문의 결제 금액을 읽으면 채운다.
+        잠금은 창이 잡고 있으므로 건드리지 않는다. 채웠으면 True"""
+        p = self.pending
+        if p is None:
+            return False
+        seq = self._next_round()
+        try:
+            origin = origin if origin is not None else capture.monitor_origin()
+            box = covered_box(p.window.screen_rect, origin, img.shape)
+            mask_rect(img, p.window.screen_rect, origin)
+            a, ocr_sec = timed_analysis(self.analyze_frame, img)
+            a.title_key = title_key(title)
+            site = a.page.site if a.page else ''
+            if not a.is_checkout or not a.amount:
+                stage = a.stage.label if a.stage else '-'
+                if box:
+                    # 팝업이 브라우저 위에 겹친 부분은 지우고 읽었다: 결제 금액이 그 아래 있었으면 못 읽는다
+                    pct = (box[2] - box[0]) * (box[3] - box[1]) * 100 // max(1, img.shape[0] * img.shape[1])
+                    self.log.info(f'amount | 금액 못 읽음 ({stage}) | 팝업이 캡처 영역의 {pct}%를 가림 '
+                                  f'({box[2] - box[0]}x{box[3] - box[1]}, 이미지 기준 {box[0]},{box[1]})', console=False)
+                else:
+                    self.log.debug(f'amount 팝업이 떠 있는 동안 금액 못 읽음 ({stage})')
+                return False
+            if not self.orders.fill(p.order, site, a.amount, frame_hash, a.title_key):
+                self.log.event('auto', a, dup='other', ocr_sec=ocr_sec, note='팝업의 주문과 다른 주문이라 채우지 않음')
+                return False
+            amount, window = a.amount, p.window
+            self.ui.post(lambda: window.fill_price(amount, seq))
+            self.log.event('auto', a, dup='same', action='fill', ocr_sec=ocr_sec,
+                           note='팝업 금액 채움, ' + self._send_amount(p.order))
+            return True
+        except Exception as e:
+            print(f"!!! 결제 금액 확인 중 오류가 발생했습니다: {e}")
+            return False
+        finally:
+            self._log_timing(timing.current())
 
     # ── 자동 감지 (auto_detect.AutoDetector가 부른다) ────────
     def paused(self):
@@ -266,17 +425,16 @@ class App:
         return self._busy.acquire(blocking=False)
 
     def still_same(self):
-        """화면이 그대로라 OCR을 건너뛴 회차: 결제 화면에 계속 머무는 것으로 본다"""
+        """화면이 그대로라 OCR을 건너뛴 회차: 결제 화면에 계속 머무는 것으로 본다.
+        금액을 기다리던 결제 화면이 CHECKOUT_AMOUNT_WAIT_SEC 동안 그대로면 '확인 중' 팝업을 띄운다"""
         self.orders.still_here()
-
-    def run_auto(self, img, frame_hash):
-        """자동 감지 스레드: try_begin()으로 잠금을 잡은 뒤 부른다. 창을 띄우지 않으면 여기서 잠금을 푼다"""
+        w = self.waiting
+        if w is None or self.clock() - w.since < config.CHECKOUT_AMOUNT_WAIT_SEC or not self.try_begin():
+            return False
         shown = False
         try:
-            self._prepare()
-            started = time.perf_counter()
-            a = self.analyze_frame(img)
-            shown = self.handle_auto(a, frame_hash, time.perf_counter() - started)
+            self.waiting = None
+            shown = self._checkout_popup(w.analysis, w.order, None, '금액을 기다렸지만 못 읽어 확인 중으로 띄움')
         except Exception as e:
             print(f"!!! 자동 감지 분석 중 오류가 발생했습니다: {e}")
         finally:
@@ -284,12 +442,36 @@ class App:
                 self._busy.release()
         return shown
 
+    def _next_round(self):
+        self.round += 1
+        t = timing.current()
+        if t is not None:
+            t.info['회차'] = self.round
+        return self.round
+
+    def run_auto(self, img, frame_hash, title=None):
+        """자동 감지 스레드: try_begin()으로 잠금을 잡은 뒤 부른다. 창을 띄우지 않으면 여기서 잠금을 푼다"""
+        shown = False
+        self._next_round()
+        try:
+            self._prepare()
+            a, ocr_sec = timed_analysis(self.analyze_frame, img)
+            a.title_key = title_key(title)          # 제목 원문은 여기서 해시로만 바꾸고 버린다
+            shown = self.handle_auto(a, frame_hash, ocr_sec)
+        except Exception as e:
+            print(f"!!! 자동 감지 분석 중 오류가 발생했습니다: {e}")
+        finally:
+            if not shown:
+                self._busy.release()
+                self._log_timing(timing.current())    # 창을 띄우면 창이 만들어진 뒤 show()에서 남긴다
+        return shown
+
     def handle_auto(self, a, frame_hash, ocr_sec=None):
         """단계별 처리. 창을 띄우면 True (잠금은 창이 닫힐 때 풀린다)"""
         entering = a.is_shopping and not self.was_shopping
         self.was_shopping = a.is_shopping
         if not a.is_shopping:
-            self.orders.left()
+            self._left()
             self.log.event('auto', a, ocr_sec=ocr_sec)
             self._sample(a)
             return False
@@ -308,7 +490,7 @@ class App:
             plan = popup_model.build(a, r, self.client.block_remain())
             if plan and plan[0] == 'blocked':
                 self.log.event('auto', a, action='blocked', ocr_sec=ocr_sec, note=self._server_note(r))
-                self.ui.post(lambda: self.show(*plan, site=site))
+                self._post(lambda: self.show(*plan, site=site))
                 return True
             if r.offline:
                 self.log.event('auto', a, ocr_sec=ocr_sec, note='서버 연결 안 됨: 알림 창 없음')
@@ -319,41 +501,116 @@ class App:
             return self._handle_checkout(a, frame_hash, ocr_sec)
 
         self._remember_product(a)         # 상품 화면: 서버 호출 없이 내부 상태와 로그만
-        self.orders.left()
+        self._left()
         self.log.event('auto', a, ocr_sec=ocr_sec)
         self._sample(a)
         return False
 
+    def _left(self):
+        """결제 화면이 아닌 화면을 봤다: 지금 주문에서 떠났고, 금액 기다림도 그만둔다"""
+        self.orders.left()
+        self.waiting = None
+
     def _handle_checkout(self, a, frame_hash, ocr_sec):
         site = a.page.site if a.page else ''
-        v = self.orders.see(site, a.amount, frame_hash)
+        w = self.waiting
+        if w is not None and site and w.order.site and site != w.order.site:
+            self.waiting = w = None                 # 다른 쇼핑몰의 결제 화면으로 갔다
+        if w is not None:
+            return self._handle_waiting(w, a, site, frame_hash, ocr_sec)
+        v = self.orders.see(site, a.amount, frame_hash, a.title_key)
+        if not v.is_dup and not a.amount and self.orders.recent_known(site, exclude=v.order) is not None:
+            # 같은 쇼핑몰의 최근 주문(금액 있음)에 다시 들어온 것일 수 있다 (주문서 주소가 새로 생겨 제목으로 구분 못 함).
+            # 금액을 읽을 때까지 팝업을 미룬다. 못 읽으면 CHECKOUT_AMOUNT_WAIT_SEC 뒤 '확인 중' 팝업
+            self.waiting = AmountWait(v.order, self.clock(), a)
+            self.log.event('auto', a, dup='wait', ocr_sec=ocr_sec,
+                           note=f'금액 모름: 최근 주문과 같은 주문인지 금액을 읽을 때까지 팝업을 미룸 '
+                                f'(최대 {config.CHECKOUT_AMOUNT_WAIT_SEC}초)')
+            return False
         if v.is_dup:
             note = f'{int(v.away_sec)}초 만에 다시 옴' if v.reason == 'revisit' else f'{v.order.count}번째'
             if v.order.decision:
                 note += f', 결정: {v.order.decision}'
+            if v.filled:
+                note += f', 금액 확인 {v.order.amount:,}원 (같은 주문 기록에 채움, {self._send_amount(v.order)})'
             self.log.event('auto', a, dup=v.reason, ocr_sec=ocr_sec, note=note)
             return False
+        return self._checkout_popup(a, v.order, ocr_sec)
+
+    def _handle_waiting(self, w, a, site, frame_hash, ocr_sec):
+        """금액을 기다리던 결제 화면의 다음 분석"""
+        if a.amount:
+            self.waiting = None
+            v = self.orders.resolve(w.order, site, a.amount, frame_hash, a.title_key)
+            if v.is_dup:
+                note = '금액 확인 후 최근 주문과 같은 주문: 팝업 안 띄움'
+                if v.order.decision:
+                    note += f', 결정: {v.order.decision}'
+                self.log.event('auto', a, dup='revisit', ocr_sec=ocr_sec, note=note)
+                return False
+            return self._checkout_popup(a, v.order, ocr_sec, '금액 확인 후 새 주문')
+        self.orders.still_here()
+        waited = self.clock() - w.since
+        if waited >= config.CHECKOUT_AMOUNT_WAIT_SEC:
+            self.waiting = None
+            return self._checkout_popup(a, w.order, ocr_sec, '금액을 기다렸지만 못 읽어 확인 중으로 띄움')
+        self.log.event('auto', a, dup='wait', ocr_sec=ocr_sec,
+                       note=f'금액 확인 기다리는 중 ({int(waited)}/{config.CHECKOUT_AMOUNT_WAIT_SEC}초)')
+        return False
+
+    def _checkout_popup(self, a, order, ocr_sec, extra=''):
+        """새 주문의 결제 화면: 서버 check + 팝업. 창을 띄우면 True"""
+        site = a.page.site if a.page else ''
         name = self._item_name(a)
         r = self.client.check(**check_params(a, name))
         plan = popup_model.build(a, r, self.client.block_remain())
         if not plan:
             note = '서버 연결 안 됨: 알림 창 없음' if r.offline else self._server_note(r)
-            self.log.event('auto', a, ocr_sec=ocr_sec, note=note)
+            self.log.event('auto', a, ocr_sec=ocr_sec, note=', '.join(x for x in (note, extra) if x))
             if r.offline:
                 print("  (오프라인이라 알림 창은 띄우지 않았습니다)")
             return False
         kind, view = plan
         if kind == 'impulse':
             view.item_name = view.api_name = name or view.api_name
-            order = v.order
+            self._link_record(order, view.bl_id, a.amount)
             actions = popup_model.Actions(self.client, view,
                                           on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
-            self.log.event('auto', a, action='popup', ocr_sec=ocr_sec, note=self._popup_note(plan, self._server_note(r)))
-            self.ui.post(lambda: self.show(kind, view, actions=actions, site=site))
+            note = self._popup_note(plan, ', '.join(x for x in (self._server_note(r), extra) if x))
+            self.log.event('auto', a, action='popup', ocr_sec=ocr_sec, note=note)
+            self._post(lambda: self.show(kind, view, actions=actions, site=site, order=order))
         else:
             self.log.event('auto', a, action='blocked', ocr_sec=ocr_sec, note=self._server_note(r))
-            self.ui.post(lambda: self.show(kind, view, site=site))
+            self._post(lambda: self.show(kind, view, site=site))
         return True
+
+    # ── 서버 감지 기록의 금액 (B-5) ─────────────────────────
+    @staticmethod
+    def _link_record(order, bl_id, amount):
+        """팝업을 띄운 주문에 서버 감지 기록 번호를 잇는다. check 때 금액을 보냈으면 서버 기록에 금액이 있다"""
+        if order is None:
+            return
+        if bl_id:
+            order.bl_id = int(bl_id)
+        order.price_sent = bool(amount)
+
+    def _send_amount(self, order):
+        """나중에 읽은 금액을 서버 감지 기록(금액 0)에 채운다 (amount action). 로그에 붙일 문구를 돌려준다"""
+        if not order.bl_id:
+            return '서버 감지 기록 없음'
+        if order.price_sent:
+            return '서버 감지 기록에는 이미 금액 있음'
+        try:
+            r = self.client.fill_amount(order.bl_id, order.amount)
+        except Exception as e:                    # 서버 요청이 실패해도 팝업 금액 채우기는 그대로
+            return f'서버 감지 기록에 금액을 채우지 못함 ({e})'
+        if r.ok:
+            order.price_sent = True
+            return f'서버 감지 기록 {order.bl_id}번에 금액 채움'
+        if r.status == 409:
+            order.price_sent = True              # 이미 금액이 있거나 결제 화면 기록이 아님: 다시 보내지 않는다
+            return f'서버 감지 기록 {order.bl_id}번은 채우지 않음 ({r.msg})'
+        return f'서버 감지 기록에 금액을 채우지 못함 ({r.msg or "서버 연결 안 됨"}). 다음에 금액을 읽으면 다시 보냄'
 
     def _item_name(self, a):
         """상품명. 결제 화면은 같은 쇼핑몰에서 최근(30분) 본 상품 → 결제 화면에서 읽은 이름 → '쇼핑몰 이름 주문' 순서
@@ -392,11 +649,14 @@ class App:
         return '서버 연결 안 됨' if r.offline else f'서버 응답 실패: {r.msg}'
 
     # ── 창 ─────────────────────────────────────────────────
-    def show(self, kind, view, actions=None, site='', source='auto'):
+    def show(self, kind, view, actions=None, site='', source='auto', order=None):
         """main 스레드: 창 만들기. 창이 닫히면 잠금을 풀어 F4/자동 감지를 다시 받는다
         source: f4면 포커스를 가져오고, auto면 가져가지 않고 작업 표시줄만 깜빡인다 (popup.py 맨 위 설명)"""
         from . import popup
         take_focus = source == 'f4'
+        t, self._pending_timing = self._pending_timing, None
+        if kind == 'impulse' and view.pending and order is not None and order.amount:
+            popup_model.fill_price(view, order.amount)   # 그 사이 금액을 알게 된 주문이면 '확인 중'으로 띄우지 않는다
         try:
             if kind == 'blocked':
                 def closed():
@@ -407,12 +667,19 @@ class App:
                 self.window = popup.ImpulsePopup(self.ui, view, actions or popup_model.Actions(self.client, view),
                                                  on_closed=self._closed, take_focus=take_focus,
                                                  link_url=self.client.server + config.COOLDOWN_PAGE)
+                if view.pending and order is not None:
+                    self.pending = PendingAmount(order, self.window, site)
         except Exception:
             self._closed()
             raise
+        finally:
+            if t is not None and getattr(t, 'post_at', None) is not None:
+                t.add('popup', timing.now() - t.post_at)
+                self._log_timing(t)
 
     def _closed(self):
         self.window = None
+        self.pending = None
         self._busy.release()
 
 
@@ -421,15 +688,20 @@ def main():
     from . import popup
     from .auto_detect import AutoDetector
     capture.set_console_title(config.CONSOLE_TITLE)
-    print("화면 분석을 위한 OCR 모델을 로딩 중입니다. 최초 실행 시 약간의 시간이 걸립니다")
-    ocr.get_reader()
+    eng = ocr_engine()
+    if eng.note:
+        print(f"[OCR] {eng.note}")
+    if eng.name == 'EasyOCR':
+        print("화면 분석을 위한 OCR 모델을 로딩 중입니다. 최초 실행 시 약간의 시간이 걸립니다")
+        ocr.get_reader()
     conf = load_config()
     auto = conf['auto']
     client = Client.from_config()
     client.connect()
     client.get_setting()
     log = DetectLog(save_ocr_text=auto['save_ocr_text'])
-    log.info(f"프로그램 시작. 자동 감지 설정: {conf['auto_source']} → {auto}", console=False)
+    log.info(f"프로그램 시작. OCR 엔진: {eng.name}{' (' + eng.note + ')' if eng.note else ''}."
+             f" 자동 감지 설정: {conf['auto_source']} → {auto}", console=False)
     ui = popup.UiHost()                   # main 스레드에서 만든다
     app = App(client, ui, settings=auto, log=log)
     detector = (AutoDetector(app, auto['interval_sec'], log=log, exclude_programs=auto['exclude_programs'])
@@ -437,6 +709,7 @@ def main():
     print("\n" + "=" * 50)
     print("쇼핑몰 감지 프로그램이 실행되었습니다!")
     print_connection(client)
+    print(f"OCR 엔진: {eng.name}")
     if detector:
         print(f"자동 감지: 켜짐 ({auto['interval_sec']}초 간격, 화면이 바뀌고 멈추면 분석)."
               f" 같은 주문은 {auto['same_order_minutes']}분 안에 다시 알리지 않습니다.")

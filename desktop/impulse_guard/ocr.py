@@ -9,7 +9,7 @@ from dataclasses import dataclass, asdict
 
 import numpy as np
 
-from . import config
+from . import config, timing
 
 _reader = None
 
@@ -64,7 +64,8 @@ def get_reader():
 
 def read(img):
     """이미지(3채널 배열)에서 글자 상자 목록을 읽는다"""
-    results = get_reader().readtext(img)
+    with timing.measure('ocr'):
+        results = get_reader().readtext(img)
     return [from_raw(r) for r in results]
 
 
@@ -103,7 +104,9 @@ def read_struck(img, box, pad=3):
         return []
     crop = remove_hline(crop)
     big = cv2.resize(crop, None, fx=REREAD_SCALE, fy=REREAD_SCALE, interpolation=cv2.INTER_CUBIC)
-    return [(text, float(conf)) for _, text, conf in get_reader().readtext(big, allowlist=REREAD_ALLOWLIST)]
+    with timing.measure('reread'):
+        results = get_reader().readtext(big, allowlist=REREAD_ALLOWLIST)
+    return [(text, float(conf)) for _, text, conf in results]
 
 
 def from_raw(r):

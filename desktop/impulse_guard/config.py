@@ -7,9 +7,20 @@
 # ── OCR (원본과 같음) ──────────────────────────────────────────
 OCR_LANGS = ['ko', 'en']   # 한국어 + 영어
 OCR_GPU = False            # CPU 모드
+# OCR 엔진 (B-5): 'win' = Windows 내장 OCR (winocr.py, 화면 한 장 약 1초), 'easy' = EasyOCR (원본과 같음, 약 10초)
+# 'win'이어도 한국어 Windows OCR을 쓸 수 없으면(언어팩/패키지 없음) EasyOCR로 바꿔 쓴다 (main.ocr_engine)
+OCR_ENGINE = 'win'
+# Windows 내장 OCR (winocr.py). 작은 글자에서 쉼표를 빠뜨려서 키워서 읽는다
+WINOCR_LANG = 'ko'
+WINOCR_SCALE = 2.0         # 키우는 배율 (1배: '224910원', 2배: '224,910원')
+WINOCR_SPLIT_GAP = 1.5     # 한 줄 안에서 단어 사이가 줄 높이의 이 배수보다 멀면 다른 상자
 
 # ── 캡처 (원본과 같음) ─────────────────────────────────────────
 CAPTURE_MONITOR = 1        # mss의 monitors[1] = 주 모니터
+# 자동 감지/F4는 맨 앞 창 영역만 캡처한다 (B-5). 옆 창의 글자를 읽지 않고(개인정보, 자기 화면 오인), 이미지가 작아 OCR이 빠르다.
+# 창 영역을 못 구하거나(최소화 등) CAPTURE_MIN_SIZE보다 작으면 주 모니터 전체
+CAPTURE_ACTIVE_WINDOW = True
+CAPTURE_MIN_SIZE = 200     # px
 
 # ── 단축키 (원본과 같음) ───────────────────────────────────────
 HOTKEY = 'f4'
@@ -109,8 +120,8 @@ CHECKOUT_KEYWORDS = {
 CHECKOUT_MIN_SCORE = 4     # 점수 합이 이 이상이고
 CHECKOUT_MIN_WORDS = 2     # 서로 다른 키워드가 이 개수 이상일 때만 결제 화면 (키워드 하나로는 판정하지 않음)
 # OCR이 자주 틀리는 글자 (공백을 뺀 글자에서 바꾼 뒤 키워드와 금액 라벨을 비교한다)
-# 실제 캡처: 지그재그 '총 결제금액' → '좀 결제금억'
-CHECKOUT_OCR_FIXES = {'금억': '금액', '좀결제': '총결제', '촘결제': '총결제', '결재': '결제'}
+# 실제 캡처: 지그재그 '총 결제금액' → '좀 결제금억' (EasyOCR), '총 결제금역' (Windows OCR 1.5배)
+CHECKOUT_OCR_FIXES = {'금억': '금액', '금역': '금액', '좀결제': '총결제', '촘결제': '총결제', '결재': '결제'}
 # 결제 금액 라벨 (앞에 있을수록 우선). 라벨과 같은 줄 오른쪽이나 바로 아래의 가격을 결제 금액으로 본다
 CHECKOUT_TOTAL_LABELS = ['최종결제금액', '총결제금액', '결제예정금액', '최종결제', '총주문금액', '결제금액', '결제하기']
 CHECKOUT_TOTAL_BELOW = 3   # 라벨 아래로 상자 높이의 몇 배까지 볼지
@@ -132,8 +143,11 @@ SETTING_CACHE_SEC = 60               # 회원 설정(차단 시간, 키워드) �
 
 # ── 차단 팝업 (B-3 신규) ───────────────────────────────────────
 POPUP_MAX_REASONS = 2                # 팝업에 보여 줄 이유 개수
-POPUP_TOP_MARGIN = 48                # 주 모니터 위쪽에서 창까지 거리 (px)
+# 모든 알림 창은 주 모니터 작업 영역(작업 표시줄 제외)의 오른쪽 아래 (B-5). 브라우저 가운데의 결제 금액을 가리지 않게
+POPUP_EDGE_MARGIN = 16               # 작업 영역 오른쪽/아래 끝에서 창까지 거리 (px, 화면 배율 곱함)
+POPUP_TITLEBAR = 40                  # 창 제목 표시줄과 테두리 여유 (px, 화면 배율 곱함)
 POPUP_WIDTH = 420                    # 창 너비 (px, 높이는 내용에 맞춤)
+POPUP_MASK_MARGIN = 24              # 팝업이 떠 있는 동안 금액을 읽을 때 팝업 영역 둘레로 더 지우는 여유 (px, 화면 배율 곱함)
 POPUP_UI_POLL_MS = 100               # 다른 스레드가 보낸 화면 작업을 확인하는 간격
 POPUP_INPUT_GUARD_SEC = 0.7          # 창이 뜬 뒤 이 시간 동안 버튼 입력 무시 (하던 클릭/키 입력이 버튼에 들어가지 않게)
 POPUP_KEEP_TOP_MS = 2000             # 창이 떠 있는 동안 맨 위로 다시 올리는 간격
@@ -177,9 +191,27 @@ FRAME_HASH_SIZE = 16
 FRAME_SAME_DISTANCE = 6          # 직전 분석 화면과 이 이하로 다르면 같은 화면 (OCR 생략)
 FRAME_SETTLE_DISTANCE = 12       # 바로 앞 회차와 이 이하로 다르면 화면이 멈춘 것으로 본다 (광고 배너 등 작은 움직임 허용)
 AUTO_SETTLE_SEC = 1.0            # 화면이 바뀌는 중이면 interval_sec를 다 기다리지 않고 이 시간 뒤 다시 확인
-ORDER_SAME_DISTANCE = 20         # 결제 금액을 못 읽었을 때, 이 이하로 다르면 같은 주문
+# 창 제목으로 빨리 확인 (B-5). 제목은 기다리는 시간만 바꾸고 판정에는 쓰지 않는다 (판정은 OCR). 제목 글자는 로그에 남기지 않는다
+# 탭 제목이 따로 없으면 주소가 제목이 된다. 지그재그 'zigzag.kr/checkout/order-sheets/...',
+# 무신사 'musinsa.com/order/order-form', 쿠팡 'checkout.coupang.com/.../order/...'(직접 확인 못 함)
+# 'order'만 쓰면 'border', 'recorder' 같은 제목에도 걸려서 주소 경로 모양('/order', 'order-sheet', 'order-form')으로 찾는다
+CHECKOUT_TITLE_WORDS = ['결제', '주문서', '주문하기', '구매하기', 'checkout', 'payment',
+                        'order-sheet', 'ordersheet', 'order-form', 'orderform', '/order']   # 대소문자 무시
+AUTO_TITLE_POLL_SEC = 0.2        # 기다리는 동안 맨 앞 창 제목을 확인하는 간격. 결제 페이지 제목으로 바뀌면 바로 확인
+AUTO_FAST_SETTLE_SEC = 0.5       # 제목이 결제 페이지일 때 멈춤 확인 간격 (AUTO_SETTLE_SEC 대신)
+AUTO_CHECKOUT_INTERVAL_SEC = 1.0 # 제목이 결제 페이지인 동안의 확인 간격 (interval_sec 대신). 결제 페이지 안에서 스크롤하면 빨리 본다
+# 결제 금액을 못 읽었을 때 화면 해시가 이 이하로 다르면 같은 주문 (B-5: 20 → 6, 같은 화면 수준).
+# 실제 로그: 지그재그 결제 페이지 맨 위(금액이 안 보임)는 장바구니가 달라도 비슷해서 20이면 다른 주문을 같은 주문으로 봤다
+ORDER_SAME_DISTANCE = 6
+# 탭 제목에 이 모양(숫자가 3개 이상 든 8자 이상 영문/숫자 덩어리)이 있으면 주문서 번호처럼 주문마다 다른 제목으로 본다
+ORDER_TITLE_ID_RE = r'(?=[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{8,}'
 CHECKOUT_NAME_MINUTES = 30       # 결제 화면의 상품명: 같은 쇼핑몰에서 이 시간 안에 본 마지막 상품 이름을 쓴다
 CONSOLE_TITLE = 'impulse-guard 감지 프로그램'   # 콘솔 창 제목. 맨 앞 창이 이 제목이면 자동 감지를 건너뛴다
+# 이 프로그램의 알림 창 제목 (popup.py). 맨 앞 창이면 캡처하지 않는다 (B-5: 팝업을 클릭하면 팝업만 캡처하던 문제)
+OWN_WINDOW_TITLES = ['충동구매 방지', '충동구매 알림', '쇼핑 차단 중']
+# 결제 화면인데 금액을 못 읽었고 같은 쇼핑몰의 최근 주문(금액 있음)이 있으면, 같은 주문인지 금액을 읽을 때까지
+# 이 시간만큼 팝업을 미룬다 (B-5. 지그재그는 '구매하기'마다 주문서 주소(탭 제목)가 새로 생겨 제목으로는 구분할 수 없다)
+CHECKOUT_AMOUNT_WAIT_SEC = 3
 # 로그 (desktop 폴더 기준, Git에 올리지 않음). 캡처 이미지는 어디에도 저장하지 않는다
 LOG_DIR = 'logs'
 LOG_FILE = 'detect.log'          # 감지 결과 한 줄씩 (1MB × 5개 순환)
