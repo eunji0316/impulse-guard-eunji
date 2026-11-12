@@ -190,6 +190,23 @@ function ipp_block_log_decide($mb_id, $bl_id, $decision) {
     return ipp_affected_rows() > 0;
 }
 
+// 결제 화면 감지 기록에 나중에 읽은 금액을 채운다 (B-5, 009_block_log_price_fill.sql)
+// 본인의 데스크톱 결제 화면 detect 기록이고 금액이 아직 0일 때만 채우고 true (이미 금액이 있으면 바꾸지 않는다)
+function ipp_block_log_fill_price($mb_id, $bl_id, $price) {
+    global $g5;
+    if (!IPP_USE_SETTING || (int)$bl_id <= 0 || (int)$price <= 0) return false;
+    sql_query(" UPDATE {$g5['ipp_block_log_table']}
+                SET bl_price                 = '".(int)$price."',
+                    bl_price_filled_datetime = '".G5_TIME_YMDHIS."'
+                WHERE bl_id = '".(int)$bl_id."'
+                  AND mb_id = '".sql_real_escape_string($mb_id)."'
+                  AND bl_client = 'desktop'
+                  AND bl_event = 'detect'
+                  AND bl_is_checkout = 1
+                  AND bl_price = 0 ");
+    return ipp_affected_rows() > 0;
+}
+
 // 결정으로 만든 쿨다운 번호를 감지 기록에 잇는다
 function ipp_block_log_set_cooldown($bl_id, $cd_id) {
     global $g5;

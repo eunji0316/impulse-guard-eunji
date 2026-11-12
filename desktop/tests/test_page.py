@@ -27,6 +27,9 @@ class TestPage(unittest.TestCase):
             with self.subTest(image=name):
                 img, boxes, reread = cache.load(name)
                 a = main.analyze_boxes(boxes, img, reread)
+                if name.startswith('checkout_'):          # 결제 화면은 test_stage.py에서 확인
+                    self.assertTrue(a.page.is_checkout)
+                    continue
                 if name == 'news_page':
                     self.assertIsNone(a.page)
                     self.assertEqual(page.find_site(ocr.full_text(boxes)), '')

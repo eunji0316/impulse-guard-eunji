@@ -15,6 +15,20 @@ NO_PRICE_TEXT = '가격을 읽지 못했어요'
 NO_NAME_TEXT = '상품명을 읽지 못했어요'
 NO_NAME_API = '상품명을 읽지 못한 상품'      # 쿨다운에는 상품명이 꼭 필요해서 대신 보내는 이름
 NO_PRICE_REASON = '가격을 읽지 못해 큰 금액인지 확인할 수 없어요. 한 번 더 생각해 볼까요?'
+# 결제 화면인데 결제 금액을 아직 못 읽었을 때 (B-5). 팝업이 떠 있는 동안 화면에서 총 결제금액을 읽으면 채운다 (fill_price)
+CHECKOUT_PENDING_TEXT = '결제 금액 확인 중…'
+CHECKOUT_PENDING_REASON = '화면에 총 결제금액이 보이면 금액을 채워 드려요.'
+CHECKOUT_PENDING_POINT = '금액을 확인하면 담아두기와 포인트를 쓸 수 있어요.'
+# 나중에 채운 금액: 서버 check는 금액 0으로 계산했으므로 포인트 숫자는 보이지 않는다 (버튼을 누르면 서버가 금액으로 계산)
+FILLED_POINT_TEXT = '안 사면 포인트를 받아요 · 24시간 참으면 더 받아요'
+# 결제 화면인데 서버가 checkout 이유를 주지 않을 때(예전 서버)만 쓰는 문구. 평소 문구는 서버(ipp_reason_text)가 정한다
+CHECKOUT_FALLBACK_REASON = '결제 직전이에요. 정말 지금 필요한 물건인지 한 번만 더 생각해 봐요.'
+
+# 팝업 제목과 부제: 첫 번째 이유 코드로 고른다. 위험도 모델이 붙으면 코드나 문구만 더하면 된다
+TITLES = {
+    'checkout': ('결제하기 전에 잠깐만요!', '정말 지금 결제할까요? 한 번만 더 생각해 봐요.'),
+    None:       ('잠깐! 충동구매일 수 있어요', '결제하기 전에 한 번만 더 생각해 볼까요?'),
+}
 
 
 @dataclass
@@ -31,6 +45,10 @@ class ImpulseView:
     point_text: str = ''
     can_hold: bool = True        # 담아두기는 가격이 있어야 한다 (서버가 가격을 요구함)
     bl_id: int = 0
+    title: str = TITLES[None][0]
+    subtitle: str = TITLES[None][1]
+    is_checkout: bool = False
+    pending: bool = False        # 결제 금액 확인 중 (결제 화면인데 금액을 아직 못 읽음)
 
 
 @dataclass
@@ -58,13 +76,17 @@ def reason_texts(data):
     return texts
 
 
+def reason_codes(data):
+    return [r.get('code') for r in data.get('reasons') or [] if isinstance(r, dict)]
+
+
 def build(analysis, result, block_remain=0):
     """('blocked', BlockedView) / ('impulse', ImpulseView) / None
 
     analysis: main.Analysis, result: client.check()의 ApiResult (None이면 쇼핑 화면 아님)
     block_remain: 차단 중일 때 남은 초 (client.block_remain())
     """
-    if result is None or not result.ok or not analysis.shop.is_mall:
+    if result is None or not result.ok or not analysis.is_shopping:
         return None
     d = result.data
     p, info = analysis.prices, analysis.page
@@ -73,28 +95,51 @@ def build(analysis, result, block_remain=0):
     if d.get('is_blocking'):
         return 'blocked', BlockedView(int(block_remain or 0), name)
 
-    price = int((p.sale_price if p else 0) or 0)
+    price = int(analysis.amount or 0)
+    product = not analysis.is_checkout              # 결제 화면이면 원가/할인율은 보이지 않는다 (상품 하나의 값이 아님)
     reasons = reason_texts(d)
-    if price <= 0:
+    codes = reason_codes(d)
+    if analysis.is_checkout and 'checkout' not in codes:
+        reasons.insert(0, CHECKOUT_FALLBACK_REASON)  # 예전 서버: 결제 화면은 그래도 항상 팝업
+        codes.insert(0, 'checkout')
+    pending = analysis.is_checkout and price <= 0
+    if pending:
+        reasons.append(CHECKOUT_PENDING_REASON)
+    elif price <= 0:
         reasons.append(NO_PRICE_REASON)
-    elif not d.get('is_impulse'):
+    elif not d.get('is_impulse') and not analysis.is_checkout:
         return None
+    title, subtitle = TITLES.get(codes[0] if codes else None, TITLES[None])
 
     v = ImpulseView(
         item_name=name or NO_NAME_TEXT, api_name=name or NO_NAME_API,
-        price=price, price_text=won(price) if price else NO_PRICE_TEXT,
+        price=price, price_text=won(price) if price else (CHECKOUT_PENDING_TEXT if pending else NO_PRICE_TEXT),
         reasons=reasons[:config.POPUP_MAX_REASONS],
         point=int(d.get('point') or 0), point2=int(d.get('point2') or 0),
-        can_hold=price > 0, bl_id=int(d.get('bl_id') or 0))
-    if price and p.original_price and p.original_price > price:
+        can_hold=price > 0, bl_id=int(d.get('bl_id') or 0),
+        title=title, subtitle=subtitle, is_checkout=analysis.is_checkout, pending=pending)
+    if product and price and p.original_price and p.original_price > price:
         v.orig_text = won(p.original_price)
-    if price and p.discount_rate:
+    if product and price and p.discount_rate:
         v.rate_text = f'{p.discount_rate}%'
     if price:
         v.point_text = f'안 사면 +{v.point:,}P · 24시간 참으면 +{v.point2:,}P'
+    elif pending:
+        v.point_text = CHECKOUT_PENDING_POINT
     else:
         v.point_text = '가격을 읽지 못해 담아두기와 포인트를 쓸 수 없어요.'
     return 'impulse', v
+
+
+def fill_price(view, price):
+    """결제 금액 확인 중이던 팝업에 나중에 읽은 금액을 채운다. 채웠으면 True
+    담아두기/안 살래요는 view.price를 서버에 보내므로 채운 금액으로 쿨다운과 포인트가 계산된다"""
+    if not view.pending or price <= 0:
+        return False
+    view.price, view.price_text, view.can_hold, view.pending = int(price), won(price), True, False
+    view.reasons = [r for r in view.reasons if r != CHECKOUT_PENDING_REASON]
+    view.point_text = FILLED_POINT_TEXT
+    return True
 
 
 @dataclass
@@ -120,9 +165,14 @@ def _fail_msg(r):
 class Actions:
     """팝업 버튼의 서버 요청. 각 메서드는 서버 요청이 있어 작업 스레드에서 부른다"""
 
-    def __init__(self, client, view):
+    def __init__(self, client, view, on_decided=None):
         self.client = client
         self.view = view
+        self.on_decided = on_decided     # 결정이 정해지면 on_decided('hold' 등). 자동 감지의 중복 방지가 기억한다
+
+    def _decided(self, decision):
+        if self.on_decided:
+            self.on_decided(decision)
 
     def hold(self):
         """조금 더 생각하기 (24시간 담아두기) → 서버 cooldown"""
@@ -132,6 +182,7 @@ class Actions:
         r = self.client.cooldown(v.api_name, v.price, v.bl_id)
         if not r.ok:
             return Outcome(error=_fail_msg(r), console=f'[팝업] 담아두기 실패: {r.msg}')
+        self._decided('hold')
         expire = str(r.data.get('expire', ''))[:16]
         point2 = int(r.data.get('point2') or v.point2)
         return Outcome('타임머신에 담았어요', f'{expire}까지 참으면 +{point2:,}P를 받아요.', show_link=True,
@@ -144,11 +195,13 @@ class Actions:
             r = self.client.decide(v.bl_id, 'giveup')
             if not r.ok:
                 return Outcome(error=_fail_msg(r), console=f'[팝업] 안 살래요 기록 실패: {r.msg}')
+            self._decided('giveup')
             return Outcome('잘 참았어요!', '이번 구매를 건너뛰었어요. (가격을 몰라 포인트는 없어요)',
                            console='[팝업] 안 살래요 → 기록만 (가격 모름)')
         r = self.client.giveup(v.api_name, v.price, v.bl_id)
         if not r.ok:
             return Outcome(error=_fail_msg(r), console=f'[팝업] 안 살래요 실패: {r.msg}')
+        self._decided('giveup')
         point = int(r.data.get('point') or 0)
         text = f'+{point:,}P를 받았어요.' if point > 0 else '오늘 받을 수 있는 포인트는 모두 받았어요.'
         return Outcome('잘 참았어요!', text, console=f'[팝업] 안 살래요 → {point}P 받음 (쿨다운 {r.data.get("cd_id")}번)')
@@ -162,6 +215,7 @@ class Actions:
         return self._record('close', '창 닫기')
 
     def _record(self, decision, label):
+        self._decided(decision)          # 구매/닫기는 서버 기록이 실패해도 결정으로 본다
         if not self.view.bl_id:
             return Outcome(close=True, console=f'[팝업] {label} (기록 번호가 없어 기록하지 않음)')
         r = self.client.decide(self.view.bl_id, decision)

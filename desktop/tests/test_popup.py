@@ -14,6 +14,7 @@ import tkinter as tk
 import unittest
 
 import cache
+import checkout_samples as cs
 from impulse_guard import config, main, popup, popup_model
 from impulse_guard.popup_model import Actions, BlockedView, ImpulseView, Outcome
 from impulse_guard.server_client import ApiResult
@@ -85,6 +86,26 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(v.reasons, [popup_model.NO_PRICE_REASON])
         self.assertFalse(v.can_hold)
         self.assertIn('가격을 읽지 못해', v.point_text)
+
+    def test_checkout_pending_price(self):
+        """결제 화면인데 금액을 못 읽으면 '결제 금액 확인 중'. 나중에 fill_price로 채우면 담아두기를 켠다"""
+        a = main.analyze_boxes(cs.COUPANG_CHECKOUT)
+        a = dataclasses.replace(a, page=dataclasses.replace(a.page, checkout_total=None, total_label=''))
+        kind, v = popup_model.build(a, ApiResult(True, {**IMPULSE, 'reasons': [{'code': 'checkout', 'text': '결제 직전'}]}))
+        self.assertEqual((kind, v.price, v.price_text, v.pending, v.can_hold),
+                         ('impulse', 0, popup_model.CHECKOUT_PENDING_TEXT, True, False))
+        self.assertEqual(v.reasons, ['결제 직전', popup_model.CHECKOUT_PENDING_REASON])
+        self.assertEqual(v.point_text, popup_model.CHECKOUT_PENDING_POINT)
+        self.assertTrue(popup_model.fill_price(v, 85400))
+        self.assertEqual((v.price, v.price_text, v.pending, v.can_hold), (85400, '85,400원', False, True))
+        self.assertEqual(v.reasons, ['결제 직전'])
+        self.assertEqual(v.point_text, popup_model.FILLED_POINT_TEXT)
+        self.assertFalse(popup_model.fill_price(v, 90000))      # 한 번 채우면 다시 바꾸지 않는다
+
+    def test_product_no_price_is_not_pending(self):
+        _, v = popup_model.build(no_price(self.a), ApiResult(True, IMPULSE))
+        self.assertFalse(v.pending)
+        self.assertFalse(popup_model.fill_price(v, 1000))
 
     def test_no_price_keeps_server_reason(self):
         d = {**IMPULSE, 'reasons': [REASONS[2]]}
@@ -211,9 +232,13 @@ class TkCase(unittest.TestCase):
         except tk.TclError as e:
             raise unittest.SkipTest(f'화면이 없어 tkinter 테스트를 건너뜀: {e}')
         cls.host = popup.UiHost(cls.root)
+        # 테스트는 창을 띄우자마자 버튼을 누르므로 입력 무시 시간을 끈다 (TestInputGuard에서 따로 확인)
+        cls._guard = config.POPUP_INPUT_GUARD_SEC
+        config.POPUP_INPUT_GUARD_SEC = 0
 
     @classmethod
     def tearDownClass(cls):
+        config.POPUP_INPUT_GUARD_SEC = cls._guard
         cls.host.process()
         cls.host.close()
         cls.root.destroy()
@@ -252,9 +277,22 @@ class TestImpulsePopup(TkCase):
         self.assertEqual(p.hold_btn['bg'], config.POPUP_COLORS['primary'])
         self.assertEqual(p.giveup_btn['bg'], config.POPUP_COLORS['secondary'])
         self.assertEqual(tk.font.Font(font=p.buy_link['font']).actual('underline'), 1)
-        self.assertLessEqual(p.win.winfo_y(), self.host.px(config.POPUP_TOP_MARGIN) + 40)    # 화면 위쪽
+        left, top, right, bottom = popup.work_area(p.win)                  # 작업 영역 오른쪽 아래
+        self.root.update()
+        self.assertGreaterEqual(p.win.winfo_rootx() + p.win.winfo_width(), right - self.host.px(80))
+        self.assertLessEqual(p.win.winfo_rooty() + p.win.winfo_height(), bottom)
+        self.assertGreaterEqual(p.win.winfo_rooty() + p.win.winfo_height(), bottom - self.host.px(120))
         p.destroy()
 
+
+    def test_blocked_notice_bottom_right(self):
+        """차단 안내 창도 같은 오른쪽 아래"""
+        w = popup.BlockedNotice(self.host, BlockedView(90, '겨울 패딩'), take_focus=False)
+        self.root.update()
+        left, top, right, bottom = popup.work_area(w.win)
+        self.assertGreaterEqual(w.win.winfo_rootx() + w.win.winfo_width(), right - self.host.px(80))
+        self.assertLessEqual(w.win.winfo_rooty() + w.win.winfo_height(), bottom)
+        w.destroy()
     def test_hold_shows_result(self):
         out = Outcome('타임머신에 담았어요', '2026-11-12 08:30까지 참으면 +992P를 받아요.', show_link=True)
         p, act = self.open(actions=FakeActions(delay=0.2, hold=out))
@@ -311,6 +349,63 @@ class TestImpulsePopup(TkCase):
         p.destroy()
 
 
+class TestFocusAndGuard(TkCase):
+    """포커스와 입력 보호 (B-4)"""
+
+    def test_input_guard(self):
+        """창이 뜬 직후 누른 버튼(하던 클릭/키 입력)은 무시하고, 시간이 지나면 동작한다"""
+        config.POPUP_INPUT_GUARD_SEC = 0.3
+        try:
+            act = FakeActions(buy=Outcome(close=True))
+            p = popup.ImpulsePopup(self.host, view(), act, take_focus=False)
+            p.giveup_btn.invoke()
+            p.buy_link.event_generate('<Button-1>')
+            self.root.update()
+            self.assertEqual(act.calls, [])
+            self.assertFalse(p.closed)
+            time.sleep(0.35)
+            p.buy_link.event_generate('<Button-1>')
+            self.assertTrue(self.pump(lambda: act.calls == ['buy']))
+            self.assertTrue(p.closed)
+        finally:
+            config.POPUP_INPUT_GUARD_SEC = 0
+
+    def test_x_is_not_guarded(self):
+        """X로 닫기는 바로 된다 (사용자가 의도한 동작)"""
+        config.POPUP_INPUT_GUARD_SEC = 5
+        try:
+            act = FakeActions()
+            p = popup.ImpulsePopup(self.host, view(), act, take_focus=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                p.on_x()
+                self.assertTrue(self.pump(lambda: act.calls == ['close']))
+        finally:
+            config.POPUP_INPUT_GUARD_SEC = 0
+
+    def test_auto_popup_does_not_take_focus(self):
+        p = popup.ImpulsePopup(self.host, view(), FakeActions(), take_focus=False)
+        self.root.update()
+        self.assertEqual(p.win.attributes('-topmost'), 1)
+        self.assertNotEqual(str(p.win.focus_get()), str(p.close_btn))
+        p.destroy()
+
+    def test_keep_on_top_timer(self):
+        p = popup.ImpulsePopup(self.host, view(), FakeActions(), take_focus=False)
+        self.assertIn('keep_top', p._afters)
+        p.win.attributes('-topmost', False)
+        p._keep_top()                                           # 예약된 작업이 하는 일
+        self.assertEqual(p.win.attributes('-topmost'), 1)
+        p.destroy()
+        self.assertEqual(p._afters, {})                         # 닫으면 예약 취소
+
+    def test_blocked_notice_tick_and_keep_top_coexist(self):
+        w = popup.BlockedNotice(self.host, BlockedView(100), take_focus=False)
+        self.assertEqual(set(w._afters), {'keep_top', 'tick'})
+        w.tick()
+        self.assertEqual(set(w._afters), {'keep_top', 'tick'})  # tick을 다시 불러도 하나씩만
+        w.destroy()
+
+
 class TestBlockedNotice(TkCase):
     def test_countdown(self):
         now = [100.0]
@@ -345,7 +440,7 @@ class TestApp(TkCase):
         app = main.App(client, self.host, analyze=lambda: self.analyzed.append(1) or a)
         made_in = []
         orig_show = app.show
-        app.show = lambda kind, v: (made_in.append(threading.current_thread()), orig_show(kind, v))
+        app.show = lambda kind, v, **kw: (made_in.append(threading.current_thread()), orig_show(kind, v, **kw))
         return app, fake, made_in
 
     def press_f4(self, app):
@@ -361,6 +456,7 @@ class TestApp(TkCase):
             self.assertTrue(self.pump(lambda: app.window is not None))
             self.assertEqual(made_in, [threading.main_thread()])        # 창은 main 스레드에서만
             self.assertIsInstance(app.window, popup.ImpulsePopup)
+            self.assertTrue(app.window.take_focus)                    # F4 창은 포커스를 가져온다
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.press_f4(app)                                     # 창이 떠 있으면 무시

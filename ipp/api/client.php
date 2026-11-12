@@ -121,7 +121,7 @@ if ($action === 'setting') {
 // 상품 하나에 대한 차단/충동구매 판단
 // log가 true면 기록 1건도 저장한다 (데스크톱이 요청 한 번으로 판단과 기록을 함께 하도록)
 //   차단 시간이면 blocked(통계의 차단 횟수에 들어감), 아니면 detect. 저장한 이벤트는 event로 돌려준다
-// reasons: 충동구매로 본 이유 [{code, text}]. 비어 있지 않으면 is_impulse가 1이다
+// reasons: 충동구매로 본 이유 [{code, text}]. 비어 있지 않으면 is_impulse가 1이다. is_checkout이면 checkout 이유가 맨 앞
 // orig_price, discount_rate, is_checkout은 지금은 저장만 한다. 위험도 반영은 C단계
 if ($action === 'check') {
     $site      = ipp_api_site($body, $client);
@@ -130,7 +130,8 @@ if ($action === 'check') {
     $info      = ipp_api_detect_info($body);
 
     $st       = ipp_setting_get($mb_id);
-    $reasons  = ipp_impulse_reasons($price, 'shopping', G5_TIME_YMDHIS, $item_name, $mb_id);   // 차단 사이트는 모두 쇼핑몰
+    // 차단 사이트는 모두 쇼핑몰. 결제 화면이면 checkout 이유가 붙어 항상 충동구매 팝업 대상이 된다 (B-4)
+    $reasons  = ipp_impulse_reasons($price, 'shopping', G5_TIME_YMDHIS, $item_name, $mb_id, array('is_checkout' => $info['is_checkout']));
     $blocking = ipp_is_blocking($mb_id, $site);   // 전체 차단이 켜져 있거나 site가 ''면 차단 시간인지만, 아니면 사이트 목록도 본다
     $result   = array(
         'is_blocking' => $blocking,
@@ -219,6 +220,20 @@ if ($action === 'decide') {
     }
     ipp_api_claim_decision($mb_id, $bl_id, $decision);
     ipp_api_json(200, true, array('bl_id' => $bl_id, 'decision' => $decision));
+}
+
+// 결제 화면 감지 기록에 나중에 읽은 금액을 채운다 (B-5)
+// 데스크톱이 금액을 못 읽은 채 check(금액 0)를 하고 '결제 금액 확인 중' 팝업을 띄운 뒤, 화면에서 금액을 읽었을 때 부른다
+// 본인의 데스크톱 결제 화면 detect 기록이고 금액이 0일 때만 한 번 채운다 (팝업 결정과 상관없이)
+if ($action === 'amount') {
+    if (!IPP_USE_SETTING) ipp_api_json(403, false, array('msg' => '차단 설정 기능이 꺼져 있습니다.'));
+    $bl_id = ipp_api_int($body, 'bl_id');
+    $price = ipp_api_int($body, 'price');
+    if ($bl_id <= 0 || $price <= 0) ipp_api_json(400, false, array('msg' => 'bl_id와 금액을 보내 주세요.'));
+    if (!ipp_block_log_fill_price($mb_id, $bl_id, $price)) {
+        ipp_api_json(409, false, array('msg' => '이미 금액이 있거나 찾을 수 없는 결제 화면 감지 기록입니다.'));
+    }
+    ipp_api_json(200, true, array('bl_id' => $bl_id, 'price' => $price));
 }
 
 ipp_api_json(400, false, array('msg' => '알 수 없는 요청입니다.'));

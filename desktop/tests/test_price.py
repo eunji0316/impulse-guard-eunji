@@ -116,6 +116,8 @@ EXPECTED = {
 class TestImages(unittest.TestCase):
     def test_images(self):
         for name in cache.names():
+            if name.startswith('checkout_'):
+                continue                                  # 상품 화면의 가격 분석만 본다. 결제 금액은 test_stage.py
             with self.subTest(image=name):
                 img, boxes, reread = cache.load(name)
                 r = price.analyze(boxes, img, reread=reread)

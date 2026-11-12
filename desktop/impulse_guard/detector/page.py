@@ -3,13 +3,15 @@
 서버 check 요청에 넣을 값을 OCR 결과에서 찾는 간단한 규칙이다.
 - site: 화면 글자에서 사이트 이름/로고 글자(config.SITE_HINTS)를 찾는다. 못 찾으면 ''(모름)
 - item_name: 할인가 바로 위쪽에서 같은 영역에 있는 가장 큰 글자 줄. 못 찾으면 ''
-- is_checkout: 결제 화면 단어(config.CHECKOUT_WORDS)가 2개 이상이면 True
+- is_checkout: 결제 화면인지. 화면 단계 판정(detector/stage.py, 키워드 점수)을 따른다 (B-4)
+- checkout_total: 결제 화면이면 '최종 결제금액' 등 라벨 옆의 결제 금액 (price.find_checkout_total)
 """
 import re
 from dataclasses import dataclass
 
 from .. import config
-from .price import PRICE_RE, RATE_RE
+from . import stage as stage_mod
+from .price import PRICE_RE, RATE_RE, find_checkout_total
 
 LETTER_RE = re.compile(r'[가-힣A-Za-z]')
 
@@ -20,6 +22,8 @@ class PageInfo:
     item_name: str = ''
     is_checkout: bool = False
     checkout_words: tuple = ()
+    checkout_total: int = None   # 결제 화면의 결제 금액 (못 찾으면 None)
+    total_label: str = ''        # 결제 금액을 찾은 라벨 (예: '최종결제금액')
 
 
 def find_site(text, extra_hints=None):
@@ -37,8 +41,9 @@ def find_site(text, extra_hints=None):
 
 
 def find_checkout(text):
-    found = tuple(w for w in config.CHECKOUT_WORDS if w in text)
-    return len(set(found)) >= config.CHECKOUT_MIN_WORDS, found
+    """(결제 화면인지, 찾은 키워드). 판정은 stage.classify와 같다"""
+    st = stage_mod.classify(text, is_mall=False)
+    return st.stage == stage_mod.CHECKOUT, tuple(st.words)
 
 
 def _sale_box(price_result):
@@ -77,11 +82,15 @@ def find_item_name(boxes, price_result):
     return best[1] if best else ''
 
 
-def analyze(boxes, full_text, price_result=None, extra_site_hints=None):
-    is_checkout, words = find_checkout(full_text)
-    return PageInfo(
+def analyze(boxes, full_text, price_result=None, extra_site_hints=None, stage_result=None):
+    """stage_result: stage.classify 결과 (없으면 여기서 판정)"""
+    st = stage_result or stage_mod.classify(full_text, is_mall=True)
+    info = PageInfo(
         site=find_site(full_text, extra_site_hints),
         item_name=find_item_name(boxes, price_result),
-        is_checkout=is_checkout,
-        checkout_words=words,
+        is_checkout=st.stage == stage_mod.CHECKOUT,
+        checkout_words=tuple(st.words),
     )
+    if info.is_checkout:
+        info.checkout_total, info.total_label = find_checkout_total(boxes)
+    return info
