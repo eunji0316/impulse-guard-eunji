@@ -409,8 +409,15 @@ Authorization: Bearer 3f9a...(64자리)
 응답
 
 ```json
-{ "ok": true, "bl_id": 208, "price": 149000 }
+{ "ok": true, "bl_id": 208, "price": 149000, "risk_updated": true,
+  "risk": 0.6979, "risk_level": "high", "risk_message": "충동구매일 가능성이 높아 보여요. 24시간만 담아 두고 다시 생각해 볼까요?",
+  "risk_reasons": [{ "code": "amount_ratio", "text": "평소 결제 금액의 5배예요." }, ...], "risk_show_reasons": true, "risk_model": "20261113-synthetic" }
 ```
+
+- **위험도 다시 계산 (C-2)**: 금액을 채우면 서버가 위험도를 다시 계산해 `check`와 같은 `risk_*` 칸으로 돌려줍니다. 데스크톱은 떠 있는 팝업의 배지·제목·부제·이유를 이 값으로 바꿉니다.
+  - check 때 저장한 원시 값(`bl_risk_raw`)에서 **금액과 금액 비율만** 바꿉니다. 금액 비율은 check 시각(`bl_datetime`) 이전 기록으로 계산하고, 시각·상품 화면 숫자·과거 기록 특성은 check 때 값 그대로입니다.
+  - `risk_updated`: 다시 계산했으면 `true`. check 때 위험도를 계산하지 않았거나(모델 꺼짐/없음) 지금 모델이 없으면 `false`이고 `risk: null` (금액은 그래도 채웁니다)
+  - 기록: `bl_risk`, `bl_risk_level`, `bl_risk_reasons`, `bl_risk_raw`가 새 값으로 바뀌고, check 때 값은 `bl_risk_first`, `bl_risk_level_first`, `bl_risk_reasons_first`에, 다시 계산한 시각은 `bl_risk_updated_datetime`에 남습니다 (`ipp/sql/011_block_log_risk_update.sql`). 다시 계산하지 않은 기록은 `bl_risk_updated_datetime`이 NULL입니다. 팝업 결정이 다시 계산 전인지 후인지는 `bl_decision_datetime`과 비교합니다.
 
 - `bl_id`나 `price`가 없거나 0 이하면 400 `"bl_id와 금액을 보내 주세요."`
 - 다른 회원의 기록, 데스크톱 결제 화면 `detect` 기록이 아닌 것(상품 화면, `blocked`, 확장 프로그램), **이미 금액이 있는 기록**, 없는 기록은 409 `"이미 금액이 있거나 찾을 수 없는 결제 화면 감지 기록입니다."` (금액은 한 번만 채우고 바꾸지 않습니다)

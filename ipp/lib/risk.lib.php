@@ -177,14 +177,7 @@ function ipp_risk_raw($mb_id, $price, $req, $p, $now = null) {
     $since = function ($days) use ($ts) { return date('Y-m-d H:i:s', $ts - (int)$days * 86400); };
     $amount = ($price > 0) ? (int)$price : null;
 
-    // 금액 비율: 이전 90일 결제 화면 금액 평균 (금액을 읽은 기록만)
-    $ratio = null;
-    if ($amount) {
-        $row = sql_fetch(" SELECT COUNT(*) AS cnt, AVG(bl_price) AS avg FROM {$bl}
-                           WHERE mb_id = '{$mb}' AND bl_is_checkout = 1 AND bl_price > 0
-                             AND bl_datetime >= '".$since($p['ratio_window_days'])."' AND bl_datetime < '{$now}' ");
-        $ratio = ((int)$row['cnt'] >= $p['ratio_min_count'] && $row['avg'] > 0) ? round($amount / $row['avg'], 4) : 1.0;
-    }
+    $ratio  = ipp_risk_amount_ratio($mb_id, $amount, $p, $now);
 
     $row = sql_fetch(" SELECT COUNT(*) AS cnt FROM {$bl}
                        WHERE mb_id = '{$mb}' AND bl_is_checkout = 1
@@ -222,6 +215,17 @@ function ipp_risk_raw($mb_id, $price, $req, $p, $now = null) {
     );
 }
 
+// 금액 비율: $now 이전 90일 결제 화면 금액 평균 대비 (금액을 읽은 기록만). 금액 모름이면 null, 이전 금액이 적으면 1.0
+function ipp_risk_amount_ratio($mb_id, $amount, $p, $now) {
+    global $g5;
+    if (!$amount) return null;
+    $since = date('Y-m-d H:i:s', strtotime($now) - (int)$p['ratio_window_days'] * 86400);
+    $row = sql_fetch(" SELECT COUNT(*) AS cnt, AVG(bl_price) AS avg FROM {$g5['ipp_block_log_table']}
+                       WHERE mb_id = '".sql_real_escape_string($mb_id)."' AND bl_is_checkout = 1 AND bl_price > 0
+                         AND bl_datetime >= '{$since}' AND bl_datetime < '".sql_real_escape_string($now)."' ");
+    return ((int)$row['cnt'] >= $p['ratio_min_count'] && $row['avg'] > 0) ? round($amount / $row['avg'], 4) : 1.0;
+}
+
 // 팝업 결정 → 라벨 1/0, 학습에서 뺄 것은 null (ai/risk/schema.py label_of)
 function ipp_risk_label($decision, $cd_status = '') {
     if ($decision === 'buy')    return 1;
@@ -241,11 +245,16 @@ function ipp_risk_assess($mb_id, $price, $req) {
     $model = ipp_risk_model();
     if (!$model) return null;
     try {
-        $raw  = ipp_risk_raw($mb_id, $price, $req, $model['raw_params']);
-        $pred = ipp_risk_predict($model, $raw);
+        $raw = ipp_risk_raw($mb_id, $price, $req, $model['raw_params']);
+        return ipp_risk_result($model, $raw);
     } catch (Throwable $e) {
         return null;
     }
+}
+
+// 원시 값 → 위험도 결과 (ipp_risk_assess, ipp_risk_reassess 공용)
+function ipp_risk_result($model, $raw) {
+    $pred    = ipp_risk_predict($model, $raw);
     $level   = ipp_risk_level($pred['prob']);
     $reasons = array();
     foreach (array_slice($pred['reasons'], 0, IPP_RISK_REASON_MAX) as $r) {
@@ -276,4 +285,56 @@ function ipp_block_log_set_risk($bl_id, $assess) {
                     bl_risk_reasons = '".sql_real_escape_string(mb_substr($codes, 0, 255))."',
                     bl_risk_raw     = '".sql_real_escape_string($raw)."'
                 WHERE bl_id = '".(int)$bl_id."' ");
+}
+
+// 결제 금액을 나중에 채운 감지 기록의 위험도를 다시 계산한다 (amount action, 011_block_log_risk_update.sql)
+// check 때 저장한 원시 값(bl_risk_raw)에서 금액과 금액 비율만 바꾼다. 금액 비율은 check 시각(bl_datetime) 이전 기록으로 계산하고,
+// 시각·상품 화면 숫자·과거 기록 특성은 check 때 값 그대로 쓴다 (그 사이 생긴 기록이 섞이지 않게).
+// check 때 위험도를 계산하지 않았거나(모델 꺼짐/없음) 모델이 지금 없으면 null
+function ipp_risk_reassess($mb_id, $bl_id, $price) {
+    global $g5;
+    if (!IPP_USE_RISK_MODEL) return null;
+    $model = ipp_risk_model();
+    if (!$model) return null;
+    $row = sql_fetch(" SELECT bl_datetime, bl_risk_raw FROM {$g5['ipp_block_log_table']}
+                       WHERE bl_id = '".(int)$bl_id."' AND mb_id = '".sql_real_escape_string($mb_id)."' ");
+    $raw = ($row && $row['bl_risk_raw']) ? json_decode($row['bl_risk_raw'], true) : null;
+    if (!is_array($raw)) return null;
+    try {
+        $raw['amount']       = (int)$price;
+        $raw['amount_ratio'] = ipp_risk_amount_ratio($mb_id, (int)$price, $model['raw_params'], $row['bl_datetime']);
+        return ipp_risk_result($model, $raw);
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+// 다시 계산한 위험도를 기록한다. 처음(check 때) 값은 *_first로 옮긴다 (처음 한 번만. 이미 다시 계산했으면 처음 값을 덮지 않는다)
+function ipp_block_log_update_risk($bl_id, $assess) {
+    global $g5;
+    if ((int)$bl_id <= 0 || !$assess) return;
+    $codes = implode(',', $assess['codes']);
+    sql_query(" UPDATE {$g5['ipp_block_log_table']}
+                SET bl_risk_first         = IF(bl_risk_updated_datetime IS NULL, bl_risk, bl_risk_first),
+                    bl_risk_level_first   = IF(bl_risk_updated_datetime IS NULL, bl_risk_level, bl_risk_level_first),
+                    bl_risk_reasons_first = IF(bl_risk_updated_datetime IS NULL, bl_risk_reasons, bl_risk_reasons_first),
+                    bl_risk                  = '".sprintf('%.4f', $assess['risk'])."',
+                    bl_risk_level            = '".sql_real_escape_string($assess['level'])."',
+                    bl_risk_model            = '".sql_real_escape_string(mb_substr($assess['model'], 0, 40))."',
+                    bl_risk_reasons          = '".sql_real_escape_string(mb_substr($codes, 0, 255))."',
+                    bl_risk_raw              = '".sql_real_escape_string(json_encode($assess['raw']))."',
+                    bl_risk_updated_datetime = '".G5_TIME_YMDHIS."'
+                WHERE bl_id = '".(int)$bl_id."' ");
+}
+
+// 응답에 넣을 위험도 칸 (check와 amount 공용). 계산하지 않았으면 null/빈 값
+function ipp_risk_response($assess) {
+    return array(
+        'risk'              => $assess ? $assess['risk'] : null,
+        'risk_level'        => $assess ? $assess['level'] : '',
+        'risk_message'      => $assess ? $assess['message'] : '',
+        'risk_reasons'      => $assess ? $assess['reasons'] : array(),
+        'risk_show_reasons' => $assess ? $assess['show_reasons'] : false,
+        'risk_model'        => $assess ? $assess['model'] : ''
+    );
 }
