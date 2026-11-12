@@ -151,7 +151,7 @@ F4를 누르지 않아도 화면을 확인합니다. F4는 디버그·백업용�
 
 **화면 단계** (`detector/stage.py`): 결제 키워드 점수(`config.CHECKOUT_KEYWORDS`)가 4점 이상이고 서로 다른 키워드가 2개 이상이면 결제 화면, 아니면 원본 규칙으로 상품 화면/쇼핑 아님. 키워드는 공백을 빼고, OCR이 자주 틀리는 글자(`config.CHECKOUT_OCR_FIXES`, 예: '좀 결제금억' → '총결제금액')를 고친 뒤 비교합니다. 실제 결제 화면 캡처 2장(무신사, 지그재그)으로 보정했습니다.
 
-**화면 분류 모델 (C-1)** (`detector/classifier.py`, 학습: `ai/screen/`): 위 키워드 판정 대신 문자 n-gram TF-IDF + 로지스틱 회귀가 단계를 정합니다 (`stage.decide`). 모델 파일 `impulse_guard/models/screen_classifier.json`을 numpy로만 계산하고(0.5ms 안팎), 모델이 고른 분류의 확률이 `config.SCREEN_MODEL_MIN_PROB`(0.6)보다 낮거나 모델 파일이 없거나 오류가 나면 키워드 판정을 씁니다. 장바구니는 상품 화면, 주문 완료/주문 내역/배송 조회는 쇼핑 아님입니다. 프로그램 시작 때 `화면 분류:` 줄에 어느 방법을 쓰는지 나옵니다.
+**화면 분류 모델 (C-1)** (`detector/classifier.py`, 학습: `ai/screen/`): 위 키워드 판정 대신 문자 n-gram TF-IDF + 로지스틱 회귀가 단계를 정합니다 (`stage.decide`). 모델 파일 `impulse_guard/models/screen_classifier.json`을 numpy로만 계산하고(0.5ms 안팎), 모델이 고른 분류의 확률이 `config.SCREEN_MODEL_MIN_PROB`(0.5)보다 낮거나 모델 파일이 없거나 오류가 나면 키워드 판정을 씁니다. 장바구니는 상품 화면, 주문 완료/주문 내역/배송 조회는 쇼핑 아님입니다. 프로그램 시작 때 `화면 분류:` 줄에 어느 방법을 쓰는지 나옵니다.
 
 | 단계 | 차단 시간 아님 | 차단 시간 |
 |---|---|---|

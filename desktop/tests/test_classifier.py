@@ -104,7 +104,7 @@ class TestDecide(unittest.TestCase):
         classifier.set_model(FakeModel('none', config.SCREEN_MODEL_MIN_PROB - 0.01))
         r = stage.decide(self.PRODUCT_TEXT, True)
         self.assertEqual((r.stage, r.source, r.fallback), (stage.PRODUCT, 'keyword', '저신뢰'))
-        self.assertIn('| 키워드 판정 (저신뢰: 모델 쇼핑 아님 0.59)', r.evidence())
+        self.assertIn(f'| 키워드 판정 (저신뢰: 모델 쇼핑 아님 {config.SCREEN_MODEL_MIN_PROB - 0.01:.2f})', r.evidence())
 
     def test_threshold_is_inclusive(self):
         classifier.set_model(FakeModel('none', config.SCREEN_MODEL_MIN_PROB))
