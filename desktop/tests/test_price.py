@@ -90,6 +90,35 @@ class TestAnalyze(unittest.TestCase):
         self.assertEqual(roles[2480], 'other')
         self.assertEqual(r.sale_price, 49600)
 
+    def test_benefit_amounts_not_verified(self):
+        """혜택/적립 금액끼리 할인율 검산을 통과해도 원가/할인가가 아님 (C-2, 무신사 결제 화면 Windows OCR 1배:
+        '최대 32,500원 혜택'과 '6,180원 구매 적립'이 80%로 검산 통과해 원가 32,500원, 할인가 6,180원이 됐던 사례)"""
+        boxes = [
+            box('80%', 0, 10, 30, 16),
+            box('79,000원', 34, 0, 93, 31),
+            box('최대 32,500원 혜택', 0, 200, 150, 18),
+            box('무신사머니 첫 결제 시 6,180원 구매 적립', 0, 240, 260, 18),
+        ]
+        r = price.analyze(boxes)
+        self.assertEqual(r.sale_price, 79000)
+        self.assertIsNone(r.original_price)
+        self.assertFalse(r.verified)
+        roles = {c.value: (c.role, c.reason) for c in r.candidates}
+        self.assertEqual(roles[32500], ('other', '혜택/적립 금액 (혜택)'))
+        self.assertEqual(roles[6180], ('other', '혜택/적립 금액 (적립)'))
+
+    def test_benefit_label_on_left(self):
+        """같은 줄 왼쪽 항목 이름이 혜택이면 ('구매 혜택 … 최대 630원') 꾸밈말을 건너뛰고 혜택 금액으로 본다"""
+        r = price.analyze([box('구매 혜택', 0, 0, 60, 18), box('최대', 200, 0, 30, 18), box('630원', 235, 0, 40, 18)])
+        self.assertIsNone(r.sale_price)
+        self.assertEqual(r.candidates[0].role, 'other')
+
+    def test_sale_labels_are_not_benefit(self):
+        """'혜택가', '쿠폰할인가', '쿠폰적용가'는 판매가 라벨이라 혜택 금액으로 빼지 않는다"""
+        for label in ('최대혜택가', '쿠폰할인가', '쿠폰적용가'):
+            r = price.analyze([box(label, 0, 0, 80, 18), box('44,800원', 90, 0, 90, 18)])
+            self.assertEqual(r.sale_price, 44800, label)
+
     def test_no_price(self):
         r = price.analyze([box('오늘의 뉴스', 0, 0, 90, 20)])
         self.assertIsNone(r.sale_price)

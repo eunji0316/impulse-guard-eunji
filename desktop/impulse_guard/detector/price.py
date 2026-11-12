@@ -434,7 +434,17 @@ def analyze(boxes, img=None, reread=None):
         prices = apply_reread(boxes, prices, img, reread)
     product_rates = score_candidates(prices, rates, boxes, img)
     result = PriceResult(candidates=prices, rates=rates)
-    pool = [c for c in prices if c.role != 'excluded']
+    # 혜택/적립 금액은 할인가·원가가 될 수 없다 (C-2: 무신사 '최대 32,500원 혜택'과 '6,180원 구매 적립'이
+    # 할인율 검산을 통과해 원가/할인가로 뽑힌 사례). 역할 점수와 상관없이 빼고 기타로 둔다
+    benefits = []
+    for c in prices:
+        if c.role == 'excluded':
+            continue
+        w = benefit_word(c, boxes, config.PRICE_BENEFIT_WORDS, strip_sale=True)
+        if w:
+            c.role, c.reason = 'other', f'혜택/적립 금액 ({w})'
+            benefits.append(c)
+    pool = [c for c in prices if c.role != 'excluded' and c not in benefits]
     if not pool:
         return result
 
@@ -509,18 +519,26 @@ def _is_filler(text):
     return not re.sub(r'[\d,.원₩MPp]', '', n)
 
 
-def benefit_word(c, boxes):
-    """결제 금액 후보 c가 혜택/적립/쿠폰/할인 금액이면 그 근거 단어, 아니면 ''
+def benefit_word(c, boxes, words=None, strip_sale=False):
+    """가격 후보 c가 혜택/적립/쿠폰/할인 금액이면 그 근거 단어, 아니면 ''
 
     1. 금액이 들어 있는 상자 글자 ('최대 1,630원 혜택')
     2. 같은 줄 왼쪽에서 가장 가까운 항목 이름 ('구매 혜택 … 최대 630원'). 금액/꾸밈말만 있는 상자는 건너뛴다
     결제 금액 라벨('총 결제금액 (할인 포함)' 등)이 들어 있는 글자는 빼지 않는다.
+    words: 찾을 단어 (기본 결제 화면용 CHECKOUT_TOTAL_EXCLUDE, 상품 화면은 PRICE_BENEFIT_WORDS)
+    strip_sale: 판매가 라벨('혜택가', '쿠폰적용가' 등)을 먼저 지운다 (상품 화면용)
     """
+    words = config.CHECKOUT_TOTAL_EXCLUDE if words is None else words
+    sale_words = sorted((normalize(w) for w in config.CONTEXT_SALE_WORDS), key=len, reverse=True)
+
     def word(text):
         if _is_total_label(text):
             return None                               # 결제 금액 라벨이면 빼지 않음 (더 볼 필요 없음)
         n = normalize(text)
-        return next((w for w in config.CHECKOUT_TOTAL_EXCLUDE if w in n), '')
+        if strip_sale:
+            for w in sale_words:
+                n = n.replace(w, ' ')
+        return next((w for w in words if w in n), '')
 
     own = [b for b in boxes if b.x - 1 <= c.box[0] <= b.x2 + 1 and _same_line(b.y, b.y2, c.box[1], c.box[3])]
     for b in own:
