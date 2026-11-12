@@ -30,6 +30,7 @@ from .dedup import NoticeGate, RecentOrders, title_key
 from .detect_log import DetectLog, NullLog
 from .detector import classifier, page as page_info, price, shopping, stage as stage_mod
 from .popup_model import hms as _hms
+from .risk_features import ProductTracker, summary as features_summary
 from .server_client import Client, auto_settings, load_config
 
 
@@ -210,22 +211,26 @@ def print_result(a):
         print("  - 쇼핑몰 특유의 구매 버튼이나 가격 정보가 충분히 발견되지 않았습니다.")
 
 
-def check_params(a, item_name=None):
-    """서버 check에 보낼 값. 결제 화면이면 결제 금액을 보내고 원가/할인율은 보내지 않는다 (상품 하나의 값이 아님)"""
+def check_params(a, item_name=None, features=None):
+    """서버 check에 보낼 값. 결제 화면이면 결제 금액을 보내고 원가/할인율은 보내지 않는다 (상품 하나의 값이 아님)
+    features: 결제 화면의 위험도 입력 (C-2, 상품 화면에서 센 숫자). 상품 화면이면 보내지 않는다"""
     p, info = a.prices, a.page
     product = not a.is_checkout
-    return dict(site=info.site, item_name=info.item_name if item_name is None else item_name, price=a.amount,
-                orig_price=(p.original_price or 0) if product else 0,
-                discount_rate=(p.discount_rate or 0) if product else 0,
-                is_checkout=a.is_checkout, page='product' if product else '', log=True)
+    params = dict(site=info.site, item_name=info.item_name if item_name is None else item_name, price=a.amount,
+                  orig_price=(p.original_price or 0) if product else 0,
+                  discount_rate=(p.discount_rate or 0) if product else 0,
+                  is_checkout=a.is_checkout, page='product' if product else '', log=True)
+    if a.is_checkout and features is not None:
+        params['features'] = features
+    return params
 
 
-def send_and_print(client, a):
+def send_and_print(client, a, features=None):
     """쇼핑 화면이면 서버에 위험도를 묻고 기록을 남긴 뒤 결과를 출력한다. 서버 결과(ApiResult 또는 None)를 돌려준다"""
     if not a.is_shopping:
         print("-" * 40)
         return None
-    r = client.check(**check_params(a))
+    r = client.check(**check_params(a, features=features))
     if r.ok:
         d = r.data
         print("  [서버] 위험도 판단")
@@ -240,6 +245,10 @@ def send_and_print(client, a):
         print(f"    - 충동구매 감지: {'예' if d.get('is_impulse') else '아니오'}")
         for text in popup_model.reason_texts(d):
             print(f"      · {text}")
+        if d.get('risk') is not None:
+            print(f"    - 위험도: {popup_model.risk_note(d)}")
+            for r_ in d.get('risk_reasons') or []:
+                print(f"      · {r_.get('text', '')}{'' if d.get('risk_show_reasons') else ' (낮음이라 팝업에는 안 보임)'}")
         if a.amount:
             print(f"    - 지금 포기하면 {d.get('point', 0)}P, 24시간 참으면 {d.get('point2', 0)}P")
         event = '차단' if d.get('event') == 'blocked' else '감지'
@@ -287,6 +296,7 @@ class App:
         self.orders = RecentOrders(self.settings['same_order_minutes'] * 60, clock=clock)
         self.gate = NoticeGate(self.settings['blocked_repeat_sec'], clock=clock)
         self.last_product = {}            # 쇼핑몰 → (상품명, 금액, 본 시각). 결제 화면의 상품명으로 쓴다
+        self.products = ProductTracker(clock)   # C-2: 상품 화면 숫자 특성 (메모리만, 상품명은 해시)
         self.last_frame_hash = None       # F4가 마지막으로 분석한 화면. 자동 감지는 이 화면을 다시 OCR하지 않는다
         self.was_shopping = False         # 자동 감지가 직전에 분석한 화면이 쇼핑 화면이었는지
         self._pending_timing = None       # 팝업을 요청한 회차의 시간 측정. 창이 만들어지면 로그에 남긴다
@@ -338,7 +348,10 @@ class App:
             self._prepare()
             a, ocr_sec = timed_analysis(self.analyze)
             print_result(a)
-            r = send_and_print(self.client, a)
+            if a.is_shopping and not a.is_checkout:
+                self._remember_product(a)
+            features = self._features(a)
+            r = send_and_print(self.client, a, features)
             if r is not None and r.offline:
                 print("  (오프라인이라 알림 창은 띄우지 않았습니다)")
             plan = popup_model.build(a, r, self.client.block_remain())
@@ -356,6 +369,7 @@ class App:
             elif not a.is_checkout:
                 self.orders.left()
             note = self._server_note(r) if r is not None else ''
+            note = ', '.join(x for x in (note, self._risk_log(r, features)) if x)
             self.log.event('f4', a, action=plan[0] if plan else '', ocr_sec=ocr_sec, note=self._popup_note(plan, note))
             if plan:
                 site = a.page.site if a.page else ''
@@ -498,7 +512,7 @@ class App:
                 self.log.event('auto', a, dup='wait', ocr_sec=ocr_sec,
                                note=f'차단 안내 {int(self.gate.wait_left(site))}초 뒤 다시')
                 return False
-            r = self.client.check(**check_params(a, self._item_name(a)))
+            r = self.client.check(**check_params(a, self._item_name(a), self._features(a)))
             plan = popup_model.build(a, r, self.client.block_remain())
             if plan and plan[0] == 'blocked':
                 self.log.event('auto', a, action='blocked', ocr_sec=ocr_sec, note=self._server_note(r))
@@ -574,11 +588,13 @@ class App:
         """새 주문의 결제 화면: 서버 check + 팝업. 창을 띄우면 True"""
         site = a.page.site if a.page else ''
         name = self._item_name(a)
-        r = self.client.check(**check_params(a, name))
+        features = self._features(a)
+        r = self.client.check(**check_params(a, name, features))
         plan = popup_model.build(a, r, self.client.block_remain())
+        risk = self._risk_log(r, features)
         if not plan:
             note = '서버 연결 안 됨: 알림 창 없음' if r.offline else self._server_note(r)
-            self.log.event('auto', a, ocr_sec=ocr_sec, note=', '.join(x for x in (note, extra) if x))
+            self.log.event('auto', a, ocr_sec=ocr_sec, note=', '.join(x for x in (note, extra, risk) if x))
             if r.offline:
                 print("  (오프라인이라 알림 창은 띄우지 않았습니다)")
             return False
@@ -588,7 +604,7 @@ class App:
             self._link_record(order, view.bl_id, a.amount)
             actions = popup_model.Actions(self.client, view,
                                           on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
-            note = self._popup_note(plan, ', '.join(x for x in (self._server_note(r), extra) if x))
+            note = self._popup_note(plan, ', '.join(x for x in (self._server_note(r), extra, risk) if x))
             self.log.event('auto', a, action='popup', ocr_sec=ocr_sec, note=note)
             self._post(lambda: self.show(kind, view, actions=actions, site=site, order=order))
         else:
@@ -642,6 +658,27 @@ class App:
     def _remember_product(self, a):
         if a.page and (a.page.item_name or a.amount):
             self.last_product[a.page.site] = (a.page.item_name, a.amount, self.clock())
+        if a.page:
+            rate = a.prices.discount_rate if a.prices else None
+            self.products.see(a.page.site, a.page.item_name, rate, ocr.full_text(a.boxes) if a.boxes else '')
+
+    def _features(self, a):
+        """결제 화면 check의 위험도 입력 (C-2). 상품 화면이면 None"""
+        if not a.is_checkout:
+            return None
+        return self.products.features(a.page.site if a.page else '')
+
+    @staticmethod
+    def _risk_log(r, features):
+        """로그에 남길 위험도와 보낸 특성 (숫자만)"""
+        parts = []
+        if r is not None and r.ok and r.data.get('risk') is not None:
+            parts.append(popup_model.risk_note(r.data))
+        elif r is not None and r.ok and features is not None:
+            parts.append('위험도 없음 (예전 서버 또는 모델 없음)')
+        if features is not None:
+            parts.append(features_summary(features))
+        return ', '.join(parts)
 
     def _sample(self, a):
         if self.log.save_ocr_text and a.boxes:

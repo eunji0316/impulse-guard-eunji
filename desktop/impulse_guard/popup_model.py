@@ -24,7 +24,7 @@ FILLED_POINT_TEXT = '안 사면 포인트를 받아요 · 24시간 참으면 더
 # 결제 화면인데 서버가 checkout 이유를 주지 않을 때(예전 서버)만 쓰는 문구. 평소 문구는 서버(ipp_reason_text)가 정한다
 CHECKOUT_FALLBACK_REASON = '결제 직전이에요. 정말 지금 필요한 물건인지 한 번만 더 생각해 봐요.'
 
-# 팝업 제목과 부제: 첫 번째 이유 코드로 고른다. 위험도 모델이 붙으면 코드나 문구만 더하면 된다
+# 팝업 제목과 부제: 첫 번째 이유 코드로 고른다. 결제 화면에 위험도(C-2)가 있으면 config.POPUP_RISK_STYLES와 risk_message가 대신한다
 TITLES = {
     'checkout': ('결제하기 전에 잠깐만요!', '정말 지금 결제할까요? 한 번만 더 생각해 봐요.'),
     None:       ('잠깐! 충동구매일 수 있어요', '결제하기 전에 한 번만 더 생각해 볼까요?'),
@@ -49,6 +49,11 @@ class ImpulseView:
     subtitle: str = TITLES[None][1]
     is_checkout: bool = False
     pending: bool = False        # 결제 금액 확인 중 (결제 화면인데 금액을 아직 못 읽음)
+    risk: object = None          # C-2 위험도 0~1 (None = 서버가 계산하지 않음 → 예전 팝업)
+    risk_level: str = ''         # low / mid / high (config.POPUP_RISK_STYLES)
+    risk_badge: str = ''         # '위험 높음' 등
+    title_color: str = ''        # 제목·배지 글자색 ('' = 기본)
+    badge_bg: str = ''
 
 
 @dataclass
@@ -78,6 +83,23 @@ def reason_texts(data):
 
 def reason_codes(data):
     return [r.get('code') for r in data.get('reasons') or [] if isinstance(r, dict)]
+
+
+def risk_style(data):
+    """서버 응답의 위험 단계 → config.POPUP_RISK_STYLES 값. 위험도가 없거나 모르는 단계면 None (예전 팝업)"""
+    if not isinstance(data, dict) or isinstance(data.get('risk'), bool) or not isinstance(data.get('risk'), (int, float)):
+        return None
+    return config.POPUP_RISK_STYLES.get(data.get('risk_level'))
+
+
+def risk_note(data):
+    """로그와 콘솔용: '위험도 0.65 높음 (amount_ratio,history)'"""
+    style = risk_style(data)
+    if style is None:
+        return ''
+    codes = ','.join(r.get('code', '') for r in data.get('risk_reasons') or [] if isinstance(r, dict))
+    shown = '' if data.get('risk_show_reasons') else ', 이유 안 보임'
+    return f"위험도 {float(data['risk']):.2f} {style[1].replace('위험 ', '')} ({codes or '이유 없음'}{shown})"
 
 
 def build(analysis, result, block_remain=0):
@@ -110,14 +132,29 @@ def build(analysis, result, block_remain=0):
     elif not d.get('is_impulse') and not analysis.is_checkout:
         return None
     title, subtitle = TITLES.get(codes[0] if codes else None, TITLES[None])
+    max_reasons = config.POPUP_MAX_REASONS
+    style = risk_style(d) if analysis.is_checkout else None
+    if style is not None:
+        # C-2: 위험 단계별 제목과 머리 문구. 이유 문장은 보통 이상만 (낮음은 확인 문구만). 키워드 이유는 회원이 정한 것이라 함께 보인다
+        title = style[0]
+        subtitle = d.get('risk_message') or subtitle
+        risk_texts = [r.get('text', '') for r in d.get('risk_reasons') or [] if isinstance(r, dict) and r.get('text')]
+        keyword = [r.get('text', '') for r in d.get('reasons') or [] if isinstance(r, dict) and r.get('code') == 'keyword']
+        reasons = (keyword + risk_texts)[:config.POPUP_MAX_RISK_REASONS] if d.get('risk_show_reasons') else []
+        max_reasons = config.POPUP_MAX_RISK_REASONS + 1          # + 금액 확인 중 안내
+        if pending:
+            reasons.append(CHECKOUT_PENDING_REASON)
 
     v = ImpulseView(
         item_name=name or NO_NAME_TEXT, api_name=name or NO_NAME_API,
         price=price, price_text=won(price) if price else (CHECKOUT_PENDING_TEXT if pending else NO_PRICE_TEXT),
-        reasons=reasons[:config.POPUP_MAX_REASONS],
+        reasons=reasons[:max_reasons],
         point=int(d.get('point') or 0), point2=int(d.get('point2') or 0),
         can_hold=price > 0, bl_id=int(d.get('bl_id') or 0),
         title=title, subtitle=subtitle, is_checkout=analysis.is_checkout, pending=pending)
+    if style is not None:
+        v.risk, v.risk_level = float(d['risk']), d['risk_level']
+        v.risk_badge, v.title_color, v.badge_bg = style[1], style[2], style[3]
     if product and price and p.original_price and p.original_price > price:
         v.orig_text = won(p.original_price)
     if product and price and p.discount_rate:

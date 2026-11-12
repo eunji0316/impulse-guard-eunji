@@ -308,7 +308,14 @@ class ImpulsePopup(_Window):
         # ── 묻는 화면 ──
         self.ask = tk.Frame(self.card, bg=C['card'])
         self.ask.pack(fill='both', padx=px(22), pady=px(20))
-        self.title_label = self.label(self.ask, view.title, 15, True)
+        self.badge_label = None
+        if view.risk_badge:
+            # C-2 위험 단계: 색 배지 + 제목 색 (높음 빨강, 보통 주황, 낮음 파랑). 위험도가 없으면 예전 모양 그대로
+            self.badge_label = self.label(self.ask, ' ' + view.risk_badge + ' ', 9, True,
+                                          fg=view.title_color, bg=view.badge_bg)
+            self.badge_label.pack(anchor='w', pady=(0, px(6)))
+        self.title_label = self.label(self.ask, view.title, 16 if view.risk_level == 'high' else 15, True,
+                                      fg=view.title_color or None)
         self.title_label.pack(fill='x')
         self.label(self.ask, view.subtitle, 10, fg=C['sub'], wraplength=self.wrap).pack(fill='x', pady=(px(2), 0))
 
