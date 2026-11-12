@@ -55,6 +55,22 @@
 - 위험 단계 후보 (보통 ≥ 0.3, 높음 ≥ 0.55): 45% / 40% / 14%, 실제 그래도 구매 20% / 41% / 65%
 - ai 테스트 `risk.test_risk` 8개. ai/.venv에 requirements의 pandas 3.1.0이 빠져 있어 설치함
 
+### 3. 서버 (위험 단계 0.3 / 0.55, 이유 문장은 보통 이상만 — 사용자 결정)
+
+- `ipp/lib/risk.lib.php`: 모델 JSON 읽기, 변환·예측(ai/risk/model.py와 같게), 단계, 문구(`ipp_risk_message`, `ipp_risk_reason_text`), DB 원시 값(`ipp_risk_raw`), `ipp_risk_assess`, 기록(`ipp_block_log_set_risk`)
+- `check`: 결제 화면이면 `risk`, `risk_level`, `risk_message`, `risk_reasons`(낮음이어도 채움, 최대 3개), `risk_show_reasons`(보통 이상만 true), `risk_model`.
+  입력 `features` {discount_rate, pressure, product_views_24h, same_item_views_24h, browse_sec} (숫자만). 기존 `reasons`와 포인트는 그대로. 모델이 없거나 실패하면 `risk: null`
+- 위험도는 이번 기록을 저장하기 **전에** 계산 (과거 기록 특성에 이번 결제가 섞이지 않게)
+- 설정: `IPP_USE_RISK_MODEL`, `IPP_RISK_MODEL_FILE`, `IPP_RISK_LEVEL_MID` 0.3, `IPP_RISK_LEVEL_HIGH` 0.55, `IPP_RISK_REASON_MAX` 3
+- DB `ipp/sql/010_block_log_risk.sql`: `bl_risk`, `bl_risk_level`, `bl_risk_model`, `bl_risk_reasons`(모든 이유 코드), `bl_risk_raw`(원시 값 JSON, 숫자와 null만), 인덱스 `idx_mb_checkout_dt`. 개인 DB에 두 번 실행 오류 없음
+- 테스트
+  - `php ipp/tests/risk_test.php` 107개 (JSON 예시 32개의 확률·이유가 Python과 같음, 단계, 라벨, 월급일, 요청 정리, 문구). 웹으로는 실행되지 않음
+  - 로컬 서버(8001) HTTP 29개 통과 (임시 회원 2명, 테스트 후 삭제): 상품 화면은 계산 안 함, 저장된 원시 값으로 Python이 같은 위험도·이유,
+    과거 기록 값(금액 비율 5.0, 7일 3건, 과거 선택·쿨다운 당김, 90/180일 창, close 제외), 낮음은 이유 안 보이지만 응답·기록에 남음,
+    예전 데스크톱(features 없음), 잘못된 features, 모델 파일 없으면 규칙만, 이번 결제는 자기 과거 기록에 안 들어감, 포인트 그대로
+  - 데스크톱 unittest 270개 그대로 통과
+- 문서: docs/API.md (`features`, 위험도 칸, 실제 응답), README.md (SQL 010)
+
 ### 남은 이슈
 
 - [ ] **올리브영 상품 화면 오답 (Windows OCR 1배)**: 할인가로 배송비 '오늘드림 2,500원 또는 5,000원'의 5,000원, 원가로 리뷰 수 '리뷰 6,086건'의 6,086을 읽어 17%로 검산 통과.

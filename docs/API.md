@@ -166,7 +166,8 @@ Authorization: Bearer 3f9a...(64자리)
   "is_checkout": true,
   "log": true,
   "page": "product",
-  "url": ""
+  "url": "",
+  "features": { "discount_rate": 40, "pressure": 1, "product_views_24h": 8, "same_item_views_24h": 3, "browse_sec": 45 }
 }
 ```
 
@@ -180,8 +181,19 @@ Authorization: Bearer 3f9a...(64자리)
 | `is_checkout` | | 결제 화면인지 (B-2 추가). `true`면 이유 `checkout`이 맨 앞에 붙어 `is_impulse`가 1이 됩니다 (B-4). 이때 `price`는 결제 금액, `page`는 `""` |
 | `log` | | `true`면 기록 1건을 저장하고 `event`, `bl_id`를 돌려줍니다. 차단 중(`is_blocking: true`)이면 이벤트 `blocked`, 아니면 `detect`입니다 (B-3에서 바뀜). 기본 false (B-2 추가) |
 | `page`, `url` | | `log: true`일 때 기록에 저장. `page`는 `product`, `cart`, `""` |
+| `features` | | 결제 화면 위험도 입력 (C-2 추가). **숫자만** 보냅니다 (OCR 원문, 상품명, 주소 없음). 아래 표 |
 
-`orig_price`, `discount_rate`는 **지금은 저장만 하고 위험도에는 쓰지 않습니다** (C단계에서 반영). `is_checkout`은 B-4부터 이유(`checkout`)에 반영합니다.
+`features` (모두 선택. 숫자가 아니면 모름으로 봅니다)
+
+| 칸 | 값 | 없거나 `null`이면 |
+|---|---|---|
+| `discount_rate` | 같은 쇼핑몰에서 최근 본 상품의 할인율 0~99. **할인 없음은 0** | 모름. `features`가 아예 없으면(예전 데스크톱) 바깥 `discount_rate`가 1~99일 때만 그 값 (바깥 칸의 0은 '할인 없음'과 '모름'을 구분할 수 없어 모름) |
+| `pressure` | 최근 본 상품 화면에 서두르게 하는 문구(타임딜, 품절임박, 오늘만 등)가 있으면 1 | 0 |
+| `product_views_24h` | 최근 24시간 이 쇼핑몰 상품 화면 횟수 (0~1000) | 0 |
+| `same_item_views_24h` | 최근 24시간 같은 상품 상품 화면 횟수 (0~1000) | 0 |
+| `browse_sec` | 이 쇼핑몰 상품 화면을 처음 본 때부터 결제 화면까지 초 (0~86400) | 모름 (상품 화면 없이 결제 화면) |
+
+`orig_price`는 저장만 합니다. `is_checkout`은 B-4부터 이유(`checkout`)에, C-2부터 위험도 계산에 씁니다.
 
 응답
 
@@ -213,7 +225,7 @@ Authorization: Bearer 3f9a...(64자리)
   | 끔 | 차단 | 차단 아님 | 차단 (차단 시간만 봄) |
 - `is_impulse`: 충동구매 감지 1, 아니면 0 (숫자). 규칙: 회원 키워드가 상품명에 있거나, 심야(23시~4시 전) 또는 고액(50,000원 이상). `reasons`가 비어 있지 않으면 1입니다.
 - `reasons`: 충동구매로 본 이유 목록 (B-3 추가). 중요한 것부터 `checkout`(결제 화면, B-4) → `keyword`(회원 키워드) → `big`(고액) → `night`(심야) 순서입니다. 결제 화면 문구: `"결제 직전이에요. 정말 지금 필요한 물건인지 한 번만 더 생각해 봐요."` 없으면 `[]`. `text`는 화면에 그대로 보여 줄 문구입니다 (심야: `"밤 11시~새벽 4시 사이의 심야 쇼핑이에요."`). 기준값은 `extend/ipp.extend.php`의 `IPP_DETECT_*`에서 가져옵니다.
-  - 판단(어떤 `code`인지)과 문구(`ipp_reason_text()`)를 나눠 두었습니다. 위험도 모델이 붙으면 `code`를 더하거나 문구만 바꾸고 응답 모양은 그대로 둡니다. 데스크톱 팝업 제목은 첫 번째 `code`로 고릅니다 (`checkout`이면 "결제하기 전에 잠깐만요!").
+  - 판단(어떤 `code`인지)과 문구(`ipp_reason_text()`)를 나눠 두었습니다. C-2 위험도는 이 목록을 바꾸지 않고 `risk_*` 칸으로 따로 돌려줍니다 (아래). 데스크톱 팝업 제목은 첫 번째 `code`로 고릅니다 (`checkout`이면 "결제하기 전에 잠깐만요!").
 - `keyword`: 상품명에서 찾은 첫 키워드. 없으면 `""` (예: 상품명 `[특가] 무선 이어폰` → `"특가"`)
 - `point`: 지금 포기하면 받을 포인트, `point2`: 24시간 참으면 받을 포인트(2배). 하루 상한(1,000P)은 반영하지 않은 값입니다.
 - `received`: 서버가 정리해서 받아들인 원가, 할인율, 결제 화면 여부
@@ -232,6 +244,33 @@ Authorization: Bearer 3f9a...(64자리)
     "keyword": "", "point": 496, "point2": 992, "received": { "orig_price": 0, "discount_rate": 0, "is_checkout": true },
     "event": "detect", "bl_id": 168 }
   ```
+- **위험도 (C-2)**: `is_checkout: true`일 때만 계산합니다. 상품 화면이거나, 모델이 꺼졌거나(`IPP_USE_RISK_MODEL`), 모델 파일(`ipp/model/risk_model.json`)이 없거나 계산이 실패하면 `risk: null`, `risk_level: ""`, `risk_message: ""`, `risk_reasons: []`, `risk_show_reasons: false`, `risk_model: ""`이고 위의 규칙 이유(`reasons`)는 그대로입니다.
+
+  | 칸 | 설명 |
+  |---|---|
+  | `risk` | 충동구매 위험도 0~1 (소수 4자리). 모델이 추정한 '팝업을 보고도 그대로 살' 확률 |
+  | `risk_level` | `low`(< 0.3) / `mid`(0.3 이상) / `high`(0.55 이상). 기준 `IPP_RISK_LEVEL_MID`, `IPP_RISK_LEVEL_HIGH` |
+  | `risk_message` | 단계별 팝업 머리 문구 (`ipp_risk_message()`) |
+  | `risk_reasons` | 위험을 올린 이유 `[{code, text}]` 큰 순서, 최대 3개 (`IPP_RISK_REASON_MAX`). **낮음이어도 채웁니다** (분석용) |
+  | `risk_show_reasons` | 팝업에 이유 문장을 보일지. **보통 이상만 `true`**. 낮음은 이유 없이 `risk_message`만 보입니다 |
+  | `risk_model` | 모델 버전 (예: `20261113-synthetic`) |
+
+  - 이유 `code`: `night`(심야), `evening`(늦은 저녁), `weekend`, `payday`(월급일 직후), `amount`(큰 금액), `amount_ratio`(평소 대비 금액), `discount`, `pressure`(서두르게 하는 문구), `views`(최근 상품 화면 수), `same_item`(같은 상품 반복), `browse`(짧게 보고 결제), `frequency`(최근 7일 결제 화면 수), `history`(지난 '그래도 구매' 비율), `cooldown`(담아두기 실패). 문구는 `ipp_risk_reason_text()`
+  - 서버가 DB에서 만드는 값 (이번 기록 저장 전, 그 시점 이전 기록만): 이전 90일 결제 화면 금액 평균 대비 비율(3건 미만이면 1.0), 최근 7일 결제 화면 수, 180일 동안의 팝업 결정 중 '그래도 구매' 비율과 담아두기 실패 비율(기록이 적으면 평균 쪽으로 당김)
+  - **포인트와 상관없습니다.** `point`, `point2`는 위험도와 관계없이 금액으로만 정합니다 (위험도를 일부러 올려 포인트를 받는 악용 방지)
+  - `log: true`면 감지 기록에 `bl_risk`, `bl_risk_level`, `bl_risk_model`, `bl_risk_reasons`(이유 코드 모두), `bl_risk_raw`(예측에 쓴 원시 값, 숫자와 null만)를 저장합니다 (`ipp/sql/010_block_log_risk.sql`). 나중에 팝업 결정과 짝지어 실제 데이터로 다시 평가·학습합니다 (`ai/risk/README.md`)
+  - 실제 응답 (HTTP 테스트, 과거 '그래도 구매'가 많은 임시 회원, 평소 3만 원대인데 15만 원 결제 화면. 위험도 칸만)
+
+    ```json
+    { "risk": 0.6512, "risk_level": "high",
+      "risk_message": "충동구매일 가능성이 높아 보여요. 24시간만 담아 두고 다시 생각해 볼까요?",
+      "risk_reasons": [{ "code": "amount_ratio", "text": "평소 결제 금액의 5배예요." },
+                       { "code": "history", "text": "지난 팝업에서 '그래도 구매'를 고른 적이 많아요." },
+                       { "code": "frequency", "text": "최근 7일 동안 결제 화면에 3번 들어갔어요." }],
+      "risk_show_reasons": true, "risk_model": "20261113-synthetic" }
+    ```
+
+    낮음 예 (평소보다 훨씬 작은 금액, 1시간 살펴봄): `"risk": 0.0565, "risk_level": "low", "risk_message": "결제하기 전에 한 번만 확인해요. 꼭 필요한 물건인가요?", "risk_show_reasons": false`이고 `risk_reasons`에는 `discount`, `pressure`가 들어 있습니다 (화면에는 보이지 않음).
 - 데스크톱 팝업 (B-3): `is_blocking`이면 차단 안내 창, 아니고 `is_impulse`가 1이면 충동구매 팝업을 띄웁니다. 가격을 못 읽었으면(`price: 0`) 충동구매가 아니어도 팝업을 띄웁니다. 결제 화면은 서버가 `checkout` 이유를 붙이므로 항상 팝업입니다 (B-4). 팝업에서 고른 결정은 `bl_id`로 `cooldown`, `giveup`, `decide`에 보냅니다.
 
 #### `log`: 기록
@@ -470,7 +509,7 @@ client.decide(r.data['bl_id'], 'buy')                    # 그래도 구매할�
 - **팀원 프로그램은 `client.php` + API 토큰으로 연결합니다.** 회원마다 웹에서 토큰을 발급받아 프로그램에 입력합니다.
 - 팀원 프로그램을 새 `client` 값으로 구분하려면 `extend/ipp.extend.php`의 `IPP_CLIENTS`에 추가합니다 (예: `mobile`). 기록의 `bl_client`, 쿨다운의 `cd_client`는 VARCHAR(10)입니다.
 - 앞으로 바뀔 부분 (FEATURES.md 3번)
-  - 위험도: `check`의 `orig_price`, `discount_rate`, `is_checkout`을 위험도에 반영 (C단계). 응답에 위험도 점수 칸이 추가될 예정입니다.
+  - 위험도 (C-2 완료): 결제 화면 `check`가 `risk`, `risk_level`, `risk_message`, `risk_reasons`, `risk_show_reasons`, `risk_model`을 돌려줍니다. 서버 PHP 계산(`ipp/lib/risk.lib.php`). C-3 예측 서버는 같은 JSON 모델을 씁니다
   - 사이트 토글(`sites[].on`): "차단 사이트 목록"에서 "쇼핑몰 감지 예외 목록"으로 의미가 바뀝니다.
   - 통계: 감지 출처(`bl_client`)별로 나눠 보기
 - 바꿀 때는 기존 칸의 이름과 뜻은 유지하고 새 칸을 추가하는 방식으로 합니다. 칸을 없애거나 뜻을 바꿔야 하면 이 문서에 먼저 적고 팀원과 맞춥니다.

@@ -94,7 +94,7 @@ php -S localhost:8001
 
 ### 6. 커스텀 테이블 추가
 
-`ipp/sql/` 폴더의 SQL 파일을 번호 순서대로 실행합니다. 팀 공용 DB를 복사해 왔다면 복사 이후에 추가된 번호만 실행합니다 (예: B-2의 `006_client_source.sql`, B-3의 `007_popup_decision.sql`, `008_block_all.sql`).
+`ipp/sql/` 폴더의 SQL 파일을 번호 순서대로 실행합니다. 팀 공용 DB를 복사해 왔다면 복사 이후에 추가된 번호만 실행합니다 (예: B-2의 `006_client_source.sql`, B-3의 `007_popup_decision.sql`, `008_block_all.sql`, B-5의 `009_block_log_price_fill.sql`, C-2의 `010_block_log_risk.sql`).
 
 ## 데스크톱 감지 프로그램 실행 (Windows)
 
