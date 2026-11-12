@@ -119,6 +119,11 @@ CHECKOUT_KEYWORDS = {
 }
 CHECKOUT_MIN_SCORE = 4     # 점수 합이 이 이상이고
 CHECKOUT_MIN_WORDS = 2     # 서로 다른 키워드가 이 개수 이상일 때만 결제 화면 (키워드 하나로는 판정하지 않음)
+# ── 쇼핑 화면 분류 모델 (C-1, detector/classifier.py, 학습: ai/screen/) ──
+# 모델이 정한 분류의 확률이 SCREEN_MODEL_MIN_PROB보다 낮거나, 모델 파일이 없거나, 오류가 나면 위의 키워드 판정을 쓴다
+SCREEN_MODEL_ENABLED = True
+SCREEN_MODEL_PATH = 'models/screen_classifier.json'   # impulse_guard 폴더 기준 (절대 경로도 됨)
+SCREEN_MODEL_MIN_PROB = 0.6
 # OCR이 자주 틀리는 글자 (공백을 뺀 글자에서 바꾼 뒤 키워드와 금액 라벨을 비교한다)
 # 실제 캡처: 지그재그 '총 결제금액' → '좀 결제금억' (EasyOCR), '총 결제금역' (Windows OCR 1.5배)
 CHECKOUT_OCR_FIXES = {'금억': '금액', '금역': '금액', '좀결제': '총결제', '촘결제': '총결제', '결재': '결제'}

@@ -151,6 +151,8 @@ F4를 누르지 않아도 화면을 확인합니다. F4는 디버그·백업용�
 
 **화면 단계** (`detector/stage.py`): 결제 키워드 점수(`config.CHECKOUT_KEYWORDS`)가 4점 이상이고 서로 다른 키워드가 2개 이상이면 결제 화면, 아니면 원본 규칙으로 상품 화면/쇼핑 아님. 키워드는 공백을 빼고, OCR이 자주 틀리는 글자(`config.CHECKOUT_OCR_FIXES`, 예: '좀 결제금억' → '총결제금액')를 고친 뒤 비교합니다. 실제 결제 화면 캡처 2장(무신사, 지그재그)으로 보정했습니다.
 
+**화면 분류 모델 (C-1)** (`detector/classifier.py`, 학습: `ai/screen/`): 위 키워드 판정 대신 문자 n-gram TF-IDF + 로지스틱 회귀가 단계를 정합니다 (`stage.decide`). 모델 파일 `impulse_guard/models/screen_classifier.json`을 numpy로만 계산하고(0.5ms 안팎), 모델이 고른 분류의 확률이 `config.SCREEN_MODEL_MIN_PROB`(0.6)보다 낮거나 모델 파일이 없거나 오류가 나면 키워드 판정을 씁니다. 장바구니는 상품 화면, 주문 완료/주문 내역/배송 조회는 쇼핑 아님입니다. 프로그램 시작 때 `화면 분류:` 줄에 어느 방법을 쓰는지 나옵니다.
+
 | 단계 | 차단 시간 아님 | 차단 시간 |
 |---|---|---|
 | 쇼핑 아님 | 로그만 | 로그만 |
@@ -223,6 +225,8 @@ F4를 누르지 않아도 화면을 확인합니다. F4는 디버그·백업용�
 | `popup_model.py` | 팝업에 띄울 내용과 버튼별 서버 요청 (tkinter 없음) (B-3) | 없음 (새로 추가) |
 | `popup.py` | tkinter 창: 충동구매 팝업, 차단 안내 창, 스레드 사이 화면 작업 큐 (B-3) | 없음 (새로 추가) |
 | `detector/stage.py` | 화면 단계: 쇼핑 아님 / 상품 화면 / 결제 화면, 결제 키워드 점수와 근거 (B-4) | 없음 (새로 추가) |
+| `detector/classifier.py` | 화면 분류 모델 추론 (C-1). 모델 JSON을 numpy로 계산 | 없음 (새로 추가) |
+| `models/screen_classifier.json` | 화면 분류 모델 (ai/screen/train.py가 만듦) | 없음 (새로 추가) |
 | `frame.py` | 화면 지각 해시 dHash와 해밍 거리 (B-4) | 없음 (새로 추가) |
 | `dedup.py` | 같은 주문 중복 방지, 차단 안내 재표시 간격 (B-4) | 없음 (새로 추가) |
 | `auto_detect.py` | 자동 감지 루프 스레드 (B-4) | 없음 (새로 추가) |
@@ -258,6 +262,8 @@ F4를 누르지 않아도 화면을 확인합니다. F4는 디버그·백업용�
 ## 테스트
 
 OCR은 느리므로 테스트 이미지의 OCR 결과를 `tests/ocr_cache/*.json`에 저장해 두고 다시 씁니다.
+`tests/ocr_cache/`는 가격/페이지 정답이 있는 7장 전용입니다. 화면 분류 평가용으로 이미지를 더 넣을 때는 `make_ocr_cache.py`가 아니라
+`make_screen_cache.py`로 `tests/screen_cache/`에 캐시를 만듭니다 (C-1, `ai/screen/README.md`).
 
 ```powershell
 cd desktop
@@ -283,6 +289,8 @@ cd desktop
 | `tests/test_auto.py` | 자동 감지 루프와 종료, 단계별 처리(가짜 서버 + 실제 창), 로그, 마스킹, 설정 (B-4). 시간 측정 (B-5) |
 | `tests/test_capture.py` | 맨 앞 창 캡처 영역: 화면 밖 자르기, 보조 모니터, 너무 작으면 모니터 전체 (B-5) |
 | `tests/test_winocr.py` | Windows OCR 단어 잇기/나누기, 엔진 선택과 EasyOCR 전환, 실제 결제 화면 점수와 금액 (한국어 Windows OCR이 있을 때만) (B-5) |
+| `tests/test_classifier.py` | 화면 분류 모델 (C-1): 추론 계산, 모델 없음/깨짐/저신뢰/오류 시 키워드 판정, 실측 캐시 정답, 주문 완료는 쇼핑 아님, 판정 시간 |
+| `tests/make_screen_cache.py` | 분류 평가용 OCR 글자 캐시 `tests/screen_cache/<win|easy>/` (모든 이미지, 정답은 파일 이름: checkout / product·cart / 그 밖은 쇼핑 아님) |
 | `tests/bench_ocr.py` | 같은 이미지로 엔진별 시간, 단계, 결제 점수, 금액 비교 (`--engine app/easy/win`) (B-5) |
 
 ## 진행 원칙
