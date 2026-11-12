@@ -26,7 +26,7 @@ ROLES = ['sale', 'original', 'other']
 
 # 가격: ₩ 접두사 또는 숫자(쉼표/마침표 포함) + '원'(선택)
 PRICE_RE = re.compile(r'(₩\s?)?(\d[\d,.]*\d|\d)(\s?원)?')
-RATE_RE = re.compile(r'(\d{1,2})\s?%')
+RATE_RE = re.compile(r'(?<!\d)(\d{1,2})\s?%')   # 앞에 숫자가 붙으면 아님 ('150%'(15% 오인식)의 50%)
 COMMA_RE = re.compile(r'^\d{1,3}(,\d{3})+$')
 DOT_RE = re.compile(r'^\d{1,3}(\.\d{3})+$')     # OCR이 쉼표를 마침표로 읽은 경우
 PERCENT_MISREAD_RE = re.compile(r'(\d{1,2})(96|76)')
@@ -423,6 +423,29 @@ def _conf(c, role, verified):
     return round(0.5 * _margin(c, role) + 0.3 * (1.0 if verified else 0.0) + 0.2 * c.ocr_conf, 3)
 
 
+def _rate_next_to(sale, product_rates):
+    """할인가 sale 옆에 있는 상품 할인율 (가장 가까운 것). 없으면 None
+
+    product_rates는 이미 범위 밖과 혜택 문맥(쿠폰/적립/카드/최대 등, RATE_OTHER_WORDS)을 뺀 할인율이다.
+    """
+    x0, y0, x1, y1 = sale.box
+    h = max(y1 - y0, 1)
+    best = None
+    for r in product_rates:
+        rx0, ry0, rx1, ry1 = r.box
+        dx = max(rx0 - x1, x0 - rx1, 0)
+        if _same_line(y0, y1, ry0, ry1):
+            ok = dx <= h * config.RATE_NEAR_SAME_LINE
+        else:
+            dy = max(ry0 - y1, y0 - ry1, 0)
+            ok = dy <= h * config.RATE_NEAR_OTHER_LINE and dx <= h * config.RATE_NEAR_X
+        if ok:
+            d = math.hypot(r.cx - sale.cx, r.cy - sale.cy)
+            if best is None or d < best[0]:
+                best = (d, r)
+    return best[1] if best else None
+
+
 def analyze(boxes, img=None, reread=None):
     """OCR 상자(와 이미지)에서 할인가, 원가, 할인율을 찾는다
 
@@ -484,6 +507,13 @@ def analyze(boxes, img=None, reread=None):
                 result.rate_conf = round(min(result.sale_conf, result.original_conf) * 0.8, 3)
             if product_rates and result.original_price:
                 result.rate_shown = True
+            if result.discount_rate is None:
+                rate = _rate_next_to(s, product_rates)
+                if rate is not None:
+                    # 원가는 모르고 할인율만 화면에서 읽음. 검산하지 못했으므로 확신도를 낮게 둔다
+                    result.discount_rate, result.rate_shown = rate.value, True
+                    result.rate_conf = round(min(result.sale_conf, 0.3 + 0.4 * rate.ocr_conf), 3)
+                    rate.reason = '할인가 옆 (원가 모름)'
 
     # 후보마다 최종 역할과 사유 기록
     for c in pool:

@@ -119,6 +119,35 @@ class TestAnalyze(unittest.TestCase):
             r = price.analyze([box(label, 0, 0, 80, 18), box('44,800원', 90, 0, 90, 18)])
             self.assertEqual(r.sale_price, 44800, label)
 
+    def test_rate_next_to_sale_without_original(self):
+        """원가를 못 읽어도 할인가 옆(같은 줄, 또는 바로 위 줄에 가로로 붙음)의 상품 할인율은 쓴다 (C-2)"""
+        r = price.analyze([box('58%', 0, 0, 30, 22), box('49,600원', 40, 0, 80, 22)])
+        self.assertEqual((r.sale_price, r.original_price, r.discount_rate), (49600, None, 58))
+        self.assertTrue(r.rate_shown)
+        self.assertFalse(r.verified)
+        self.assertLess(r.rate_conf, r.sale_conf + 1e-9)
+        # 컬리 장바구니: 할인율이 원가 줄(할인가 바로 위)에 있다
+        r = price.analyze([box('49%', 0, 0, 35, 12), box('59,400원', 1, 26, 107, 26)])
+        self.assertEqual(r.discount_rate, 49)
+
+    def test_rate_not_next_to_sale(self):
+        """할인가에서 먼 퍼센트는 쓰지 않는다"""
+        r = price.analyze([box('49,600원', 0, 0, 80, 22), box('58%', 300, 0, 30, 22)])        # 같은 줄이지만 멀다
+        self.assertIsNone(r.discount_rate)
+        r = price.analyze([box('49,600원', 0, 0, 80, 22), box('58%', 0, 200, 30, 22)])        # 한참 아래
+        self.assertIsNone(r.discount_rate)
+
+    def test_rate_in_benefit_context(self):
+        """적립·카드·쿠폰·최대·혜택 문맥의 퍼센트는 할인가 옆이어도 할인율이 아님"""
+        for text in ('최대 10%', '10% 적립', '카드 7%', '10% 쿠폰', '혜택 5%', '포인트 3%'):
+            r = price.analyze([box(text, 0, 0, 60, 22), box('49,600원', 70, 0, 80, 22)])
+            self.assertIsNone(r.discount_rate, text)
+
+    def test_rate_with_digit_before(self):
+        """'150%'(15% 오인식)에서 50%를 할인율로 읽지 않는다"""
+        _, rates = price.find_tokens([box('150%', 0, 0, 40, 18)])
+        self.assertEqual(rates, [])
+
     def test_no_price(self):
         r = price.analyze([box('오늘의 뉴스', 0, 0, 90, 20)])
         self.assertIsNone(r.sale_price)
