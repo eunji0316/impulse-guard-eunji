@@ -7,6 +7,10 @@
 - 쇼핑 아님: 둘 다 아님
 
 판정 결과에는 근거(찾은 키워드와 점수, 기준 점수)를 함께 담는다. 로그와 나중의 분류 모델 학습에 쓴다.
+
+C-1부터 실제 판정은 decide(): 분류 모델(detector/classifier.py)이 정하고, 모델이 없거나 확률이
+config.SCREEN_MODEL_MIN_PROB보다 낮거나 오류가 나면 위의 키워드 판정(classify)을 쓴다.
+모델은 장바구니를 상품 화면, 주문 완료/주문 내역/배송 조회를 쇼핑 아님으로 본다 (ai/screen/README.md).
 """
 from dataclasses import dataclass, field
 
@@ -28,6 +32,10 @@ class StageResult:
     score: int = 0                                 # 결제 키워드 점수 합
     matched: list = field(default_factory=list)    # [(키워드, 점수), ...] 점수 큰 순
     threshold: int = config.CHECKOUT_MIN_SCORE
+    source: str = 'keyword'                        # 단계를 정한 방법: model / keyword (C-1)
+    model_stage: str = None                        # 모델이 고른 분류 (모델을 못 썼으면 None)
+    prob: float = None                             # 모델이 고른 분류의 확률
+    fallback: str = ''                             # 키워드 판정으로 바꾼 이유 (저신뢰, 모델 없음 등)
 
     @property
     def label(self):
@@ -38,9 +46,18 @@ class StageResult:
         return [w for w, _ in self.matched]
 
     def evidence(self):
-        """로그용 근거 문구: '점수 7/4 [최종결제금액 3, 결제수단 2, ...]'"""
+        """로그용 근거 문구: '점수 7/4 [최종결제금액 3, 결제수단 2, ...]'
+
+        모델을 거쳤으면 뒤에 붙인다: '| 모델 결제 화면 0.93' 또는 '| 키워드 판정 (저신뢰: 모델 상품 화면 0.52)'
+        모델 파일이 없을 때는 붙이지 않는다 (프로그램 시작 때 한 번 기록한다)
+        """
         inner = ', '.join(f'{w} {p}' for w, p in self.matched)
-        return f'점수 {self.score}/{self.threshold} [{inner}]'
+        text = f'점수 {self.score}/{self.threshold} [{inner}]'
+        if self.source == 'model':
+            text += f' | 모델 {LABELS[self.model_stage]} {self.prob:.2f}'
+        elif self.model_stage:
+            text += f' | 키워드 판정 ({self.fallback}: 모델 {LABELS[self.model_stage]} {self.prob:.2f})'
+        return text
 
 
 def normalize(text):
@@ -75,3 +92,30 @@ def classify(text, is_mall):
     else:
         stage = NONE
     return StageResult(stage, score, matched)
+
+
+def decide(text, is_mall):
+    """C-1: 분류 모델로 단계를 정한다. 모델을 못 쓰거나 확신이 낮으면 키워드 판정(classify)
+
+    결제 키워드 우선: 키워드 판정이 결제 화면이고 모델이 상품 화면을
+    SCREEN_KEYWORD_CHECKOUT_MAX_PROB 미만으로 말하면 결제 화면 (결제 화면을 놓치지 않게)
+    키워드 점수와 찾은 키워드는 어느 쪽이든 근거로 함께 남긴다.
+    """
+    kw = classify(text, is_mall)
+    if not config.SCREEN_MODEL_ENABLED:
+        return kw
+    from . import classifier                       # stage는 모델 없이도 쓰이므로 여기서 불러온다
+    pred = classifier.predict(text)
+    if pred is None:
+        kw.fallback = classifier.last_error() or '모델 판정 못 함'
+        return kw
+    label, prob, _ = pred
+    kw.model_stage, kw.prob = label, prob
+    if prob < config.SCREEN_MODEL_MIN_PROB:
+        kw.fallback = '저신뢰'
+        return kw
+    if kw.stage == CHECKOUT and label == PRODUCT and prob < config.SCREEN_KEYWORD_CHECKOUT_MAX_PROB:
+        kw.fallback = '결제 키워드 우선'
+        return kw
+    kw.stage, kw.source = label, 'model'
+    return kw
