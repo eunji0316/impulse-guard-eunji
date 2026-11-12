@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from . import capture, config, frame, ocr, popup_model, timing
 from .dedup import NoticeGate, RecentOrders, title_key
 from .detect_log import DetectLog, NullLog
-from .detector import page as page_info, price, shopping, stage as stage_mod
+from .detector import classifier, page as page_info, price, shopping, stage as stage_mod
 from .popup_model import hms as _hms
 from .server_client import Client, auto_settings, load_config
 
@@ -69,7 +69,7 @@ def analyze_boxes(boxes, img=None, reread=None, site_hints=None):
     """OCR 상자로 쇼핑 판정, 화면 단계, 가격 분석, 페이지 정보를 만든다 (테스트는 OCR 캐시로 부른다)"""
     text = ocr.full_text(boxes)
     shop = shopping.judge(text)
-    st = stage_mod.classify(text, shop.is_mall)
+    st = stage_mod.decide(text, shop.is_mall)      # C-1: 분류 모델, 못 쓰면 키워드 판정
     if st.stage == stage_mod.NONE:
         return Analysis(shop, boxes=boxes, stage=st)
     prices = price.analyze(boxes, img, reread=reread)
@@ -148,6 +148,18 @@ def analyze_image(img, site_hints=None):
     if t is not None:
         t.info['엔진'] = eng.name
     return analyze_boxes(eng.read(img), img, reread=eng.reread, site_hints=site_hints)
+
+
+def screen_model_status():
+    """화면 분류 방법 안내 문구. 모델을 미리 읽어 첫 판정이 늦어지지 않게 한다 (C-1)"""
+    if not config.SCREEN_MODEL_ENABLED:
+        return '키워드 판정 (모델 꺼짐: config.SCREEN_MODEL_ENABLED)'
+    model = classifier.get_model()
+    if model is None:
+        return f'키워드 판정 ({classifier.last_error()}: {classifier.model_path()})'
+    trained = model.meta.get('trained', '?')
+    return (f'분류 모델 (특성 {len(model.index):,}개, 학습 {trained},'
+            f' 확률 {config.SCREEN_MODEL_MIN_PROB} 미만이면 키워드 판정)')
 
 
 def timed_analysis(fn, *args):
@@ -702,6 +714,8 @@ def main():
     log = DetectLog(save_ocr_text=auto['save_ocr_text'])
     log.info(f"프로그램 시작. OCR 엔진: {eng.name}{' (' + eng.note + ')' if eng.note else ''}."
              f" 자동 감지 설정: {conf['auto_source']} → {auto}", console=False)
+    screen_model = screen_model_status()
+    log.info(f"화면 분류: {screen_model}", console=False)
     ui = popup.UiHost()                   # main 스레드에서 만든다
     app = App(client, ui, settings=auto, log=log)
     detector = (AutoDetector(app, auto['interval_sec'], log=log, exclude_programs=auto['exclude_programs'])
@@ -710,6 +724,7 @@ def main():
     print("쇼핑몰 감지 프로그램이 실행되었습니다!")
     print_connection(client)
     print(f"OCR 엔진: {eng.name}")
+    print(f"화면 분류: {screen_model}")
     if detector:
         print(f"자동 감지: 켜짐 ({auto['interval_sec']}초 간격, 화면이 바뀌고 멈추면 분석)."
               f" 같은 주문은 {auto['same_order_minutes']}분 안에 다시 알리지 않습니다.")

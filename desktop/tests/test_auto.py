@@ -442,7 +442,9 @@ class TestHandleAuto(TkCase):
         self.assertFalse(self.handle(app, self.product, H1))
         self.assertEqual(self.fake.count('check'), 0)
         self.assertEqual(app.last_product['coupang'][:2], ('맨즈실렉터 대박 남자 오버핏 볼룹 겨울 패딩', 49600))
-        self.assertIn('auto | 상품 화면 | coupang | 49,600원 | 점수 0/4 [] | new', self.log_lines()[-1])
+        # C-1: 근거 뒤에 분류 모델 결과(또는 저신뢰로 키워드 판정)가 붙는다. 확률 값은 모델마다 달라 형식만 본다
+        self.assertRegex(self.log_lines()[-1], r'auto \| 상품 화면 \| coupang \| 49,600원 \| 점수 0/4 \[\] \| '
+                                               r'(모델 상품 화면 0\.\d\d|키워드 판정 \(저신뢰: .+\)) \| new')
 
     def test_checkout_popup_once(self):
         app = self.make_app(check=(200, CHECKOUT_RESULT), giveup=(200, {'ok': True, 'cd_id': 9, 'point': 496}))
