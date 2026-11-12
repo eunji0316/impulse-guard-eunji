@@ -110,6 +110,29 @@ class TestDecide(unittest.TestCase):
         classifier.set_model(FakeModel('none', config.SCREEN_MODEL_MIN_PROB))
         self.assertEqual(stage.decide(self.PRODUCT_TEXT, True).source, 'model')
 
+    CHECKOUT_TEXT = '주문서 결제예정금액 결제금액 배송지 59,400원'          # 키워드: 결제 화면 (8점, 4개)
+
+    def test_checkout_keywords_win_over_unsure_product(self):
+        """결제 키워드 우선: 키워드가 결제 화면이고 모델이 상품 화면을 기준 미만으로 말하면 결제 화면 (11번가 0.61 사례)"""
+        classifier.set_model(FakeModel('product', 0.61))
+        r = stage.decide(self.CHECKOUT_TEXT, True)
+        self.assertEqual((r.stage, r.source, r.fallback), (stage.CHECKOUT, 'keyword', '결제 키워드 우선'))
+        self.assertIn('| 키워드 판정 (결제 키워드 우선: 모델 상품 화면 0.61)', r.evidence())
+
+    def test_confident_product_still_wins(self):
+        classifier.set_model(FakeModel('product', config.SCREEN_KEYWORD_CHECKOUT_MAX_PROB))
+        self.assertEqual(stage.decide(self.CHECKOUT_TEXT, True).stage, stage.PRODUCT)
+
+    def test_checkout_keywords_do_not_override_none(self):
+        """모델이 쇼핑 아님이면 결제 키워드가 있어도 쇼핑 아님 (코드 편집기에 결제 키워드 목록이 보이는 경우)"""
+        classifier.set_model(FakeModel('none', 0.6))
+        self.assertEqual(stage.decide(self.CHECKOUT_TEXT, True).stage, stage.NONE)
+
+    def test_checkout_keyword_rule_off(self):
+        classifier.set_model(FakeModel('product', 0.61))
+        with mock.patch.object(config, 'SCREEN_KEYWORD_CHECKOUT_MAX_PROB', 0):
+            self.assertEqual(stage.decide(self.CHECKOUT_TEXT, True).stage, stage.PRODUCT)
+
     def test_no_model_uses_keyword(self):
         classifier.set_model(None)
         r = stage.decide(self.PRODUCT_TEXT, True)

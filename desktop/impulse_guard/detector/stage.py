@@ -97,6 +97,8 @@ def classify(text, is_mall):
 def decide(text, is_mall):
     """C-1: 분류 모델로 단계를 정한다. 모델을 못 쓰거나 확신이 낮으면 키워드 판정(classify)
 
+    결제 키워드 우선: 키워드 판정이 결제 화면이고 모델이 상품 화면을
+    SCREEN_KEYWORD_CHECKOUT_MAX_PROB 미만으로 말하면 결제 화면 (결제 화면을 놓치지 않게)
     키워드 점수와 찾은 키워드는 어느 쪽이든 근거로 함께 남긴다.
     """
     kw = classify(text, is_mall)
@@ -111,6 +113,9 @@ def decide(text, is_mall):
     kw.model_stage, kw.prob = label, prob
     if prob < config.SCREEN_MODEL_MIN_PROB:
         kw.fallback = '저신뢰'
+        return kw
+    if kw.stage == CHECKOUT and label == PRODUCT and prob < config.SCREEN_KEYWORD_CHECKOUT_MAX_PROB:
+        kw.fallback = '결제 키워드 우선'
         return kw
     kw.stage, kw.source = label, 'model'
     return kw
