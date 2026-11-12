@@ -230,7 +230,8 @@ class Client:
         return self.call('giveup', item_name=item_name, price=int(price or 0), bl_id=int(bl_id or 0))
 
     def fill_amount(self, bl_id, price):
-        """결제 화면 감지 기록(금액 0)에 나중에 읽은 금액을 채운다 (B-5). 이미 금액이 있으면 409"""
+        """결제 화면 감지 기록(금액 0)에 나중에 읽은 금액을 채운다 (B-5). 이미 금액이 있으면 409
+        C-2: 서버가 채운 금액으로 위험도를 다시 계산해 data에 risk_updated와 risk_* 칸(check와 같음)을 준다"""
         return self.call('amount', bl_id=int(bl_id or 0), price=int(price or 0))
 
     def decide(self, bl_id, decision):

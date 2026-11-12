@@ -309,15 +309,11 @@ class ImpulsePopup(_Window):
         self.ask = tk.Frame(self.card, bg=C['card'])
         self.ask.pack(fill='both', padx=px(22), pady=px(20))
         self.badge_label = None
-        if view.risk_badge:
-            # C-2 위험 단계: 색 배지 + 제목 색 (높음 빨강, 보통 주황, 낮음 파랑). 위험도가 없으면 예전 모양 그대로
-            self.badge_label = self.label(self.ask, ' ' + view.risk_badge + ' ', 9, True,
-                                          fg=view.title_color, bg=view.badge_bg)
-            self.badge_label.pack(anchor='w', pady=(0, px(6)))
-        self.title_label = self.label(self.ask, view.title, 16 if view.risk_level == 'high' else 15, True,
-                                      fg=view.title_color or None)
+        self.title_label = self.label(self.ask, view.title, 15, True)
         self.title_label.pack(fill='x')
-        self.label(self.ask, view.subtitle, 10, fg=C['sub'], wraplength=self.wrap).pack(fill='x', pady=(px(2), 0))
+        self.subtitle_label = self.label(self.ask, view.subtitle, 10, fg=C['sub'], wraplength=self.wrap)
+        self.subtitle_label.pack(fill='x', pady=(px(2), 0))
+        self._draw_risk_header()
 
         item = tk.Frame(self.ask, bg=C['item'])
         item.pack(fill='x', pady=(px(14), 0))
@@ -339,13 +335,9 @@ class ImpulsePopup(_Window):
                        font_kw={'overstrike': 1}).pack(side='left', padx=(px(8), 0), pady=(px(4), 0))
 
         self.reason_labels = []
-        for text in view.reasons:
-            lb = self.label(self.ask, '• ' + text, 10, fg=C['danger'], wraplength=self.wrap)
-            lb.pack(fill='x', pady=(px(10) if not self.reason_labels else px(2), 0))
-            lb.reason = text
-            self.reason_labels.append(lb)
         self.point_label = self.label(self.ask, view.point_text, 10, True, fg=C['point'], wraplength=self.wrap)
         self.point_label.pack(fill='x', pady=(px(10), 0))
+        self._draw_reasons()
         self.msg = self.label(self.ask, '', 10, fg=C['danger'], wraplength=self.wrap)
         self.msg.pack(fill='x', pady=(px(4), 0))
 
@@ -382,6 +374,41 @@ class ImpulsePopup(_Window):
             self.reason_labels.remove(lb)
         self.point_label.configure(text=self.view.point_text)
         self._set_busy(False)
+        self.resize()
+        return True
+
+    # ── 위험 단계 (C-2) ──
+    def _draw_risk_header(self):
+        """배지 + 제목 색 (높음 빨강·제목 크게, 보통 주황, 낮음 파랑). 위험도가 없으면 배지 없이 예전 모양"""
+        v, px = self.view, self.host.px
+        if v.risk_badge:
+            if self.badge_label is None:
+                self.badge_label = self.label(self.ask, '', 9, True)
+                self.badge_label.pack(anchor='w', pady=(0, px(6)), before=self.title_label)
+            self.badge_label.configure(text=' ' + v.risk_badge + ' ', fg=v.title_color, bg=v.badge_bg)
+        self.title_label.configure(text=v.title, fg=v.title_color or C['text'],
+                                   font=self.host.font(16 if v.risk_level == 'high' else 15, True))
+        self.subtitle_label.configure(text=v.subtitle)
+
+    def _draw_reasons(self):
+        """이유 문장을 view.reasons로 다시 그린다 (포인트 줄 바로 위)"""
+        px = self.host.px
+        for lb in self.reason_labels:
+            lb.destroy()
+        self.reason_labels = []
+        for text in self.view.reasons:
+            lb = self.label(self.ask, '• ' + text, 10, fg=C['danger'], wraplength=self.wrap)
+            lb.pack(fill='x', pady=(px(10) if not self.reason_labels else px(2), 0), before=self.point_label)
+            lb.reason = text
+            self.reason_labels.append(lb)
+
+    def update_risk(self, data):
+        """main 스레드: 금액을 채운 뒤 서버가 다시 계산한 위험도(amount 응답)로 배지·제목·부제·이유를 바꾼다. 바꿨으면 True
+        결정을 이미 했거나(결과 화면) 버튼 요청 중이면 바꾸지 않는다"""
+        if self.closed or self.done or self.busy or not popup_model.apply_risk(self.view, data):
+            return False
+        self._draw_risk_header()
+        self._draw_reasons()
         self.resize()
         return True
 

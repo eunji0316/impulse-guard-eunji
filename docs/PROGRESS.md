@@ -95,19 +95,28 @@
 | 3 | 바로구매 → 결제 화면 | 팝업에 배지(위험 낮음/보통/높음)와 단계별 제목·색. 로그 `위험도 0.xx 단계 (이유 코드)`, `특성 할인 N%, 압박 0/1, 상품 화면 N/같은 상품 N, 머문 시간 N초` |
 | 4 | 3의 로그 특성 값 확인 | 할인율이 상품 페이지와 같거나 `모름`, 머문 시간이 상품 페이지를 처음 본 때부터 대략 맞음 |
 | 5 | 보통/높음이면 이유 문장, 낮음이면 이유 없이 확인 문구만인지 | 낮음이어도 DB `bl_risk_reasons`에는 코드가 남음 |
-| 6 | 팝업 버튼(아무거나) → HeidiSQL | `SELECT bl_id, bl_price, bl_risk, bl_risk_level, bl_risk_reasons, bl_risk_raw, bl_decision FROM g5_ipp_block_log WHERE bl_client='desktop' AND bl_is_checkout=1 ORDER BY bl_id DESC LIMIT 5;` → 위험도와 결정이 한 행에, `bl_risk_raw`에 숫자만 |
+| 6 | 팝업 버튼(아무거나) → HeidiSQL | `SELECT bl_id, bl_price, bl_risk, bl_risk_level, bl_risk_reasons, bl_risk_raw, bl_risk_first, bl_risk_level_first, bl_risk_updated_datetime, bl_decision, bl_decision_datetime FROM g5_ipp_block_log WHERE bl_client='desktop' AND bl_is_checkout=1 ORDER BY bl_id DESC LIMIT 5;` → 위험도와 결정이 한 행에, `bl_risk_raw`에 숫자만 |
 | 7 | 상품 페이지 없이 장바구니에서 바로 결제 | 머문 시간 `모름`, 할인 `모름` |
 | 8 | (예전 서버 동작) `ipp/model/risk_model.json` 이름을 잠깐 바꾸고 결제 화면 → 원래 이름으로 | 배지 없는 예전 팝업 '결제하기 전에 잠깐만요!', 로그 `위험도 없음` |
-| 9 | 결제 금액이 안 보이는 결제 페이지 맨 위 | '결제 금액 확인 중' + 단계 배지. 스크롤하면 금액 채움 (위험도는 금액 모름으로 계산된 그대로) |
+| 9 | 결제 금액이 안 보이는 결제 페이지 맨 위 | '결제 금액 확인 중' + 단계 배지. 스크롤하면 금액을 채우고 **위험도도 다시 계산해 배지·이유가 바뀔 수 있음**. 로그 `위험도 다시 계산 …`, DB `bl_risk_first`(처음 값)와 `bl_risk_updated_datetime` |
 
 - 기록이 쌓이기 전에는 과거 선택 비율이 평균값(0.35)이라 대부분 낮음~보통으로 나온다. 고액·심야·할인·같은 상품 반복이면 올라간다
 
 ### 남은 이슈 (4단계)
 
-- [ ] **금액을 나중에 채운 경우 위험도는 다시 계산하지 않는다**: '결제 금액 확인 중' 팝업은 금액 모름으로 계산한 위험도를 그대로 보인다. 다시 계산할지는 실제 사용 후 결정
+- [x] **금액을 나중에 채운 경우 위험도 다시 계산** (아래 5단계)
 - [ ] **특성은 메모리에만** 있어 프로그램을 다시 켜면 상품 화면 수·머문 시간이 0부터 다시 센다
 - [ ] 같은 상품 판단은 상품명 해시라, OCR이 상품명을 조금 다르게 읽으면 다른 상품으로 센다
 - [ ] 실제 데이터가 쌓이면 `ai/data/export.py`에 C-2 형식 추출(bl_risk_raw + bl_decision + 쿨다운 결과)을 추가하고 가상 데이터 모델을 실제 데이터로 평가
+
+### 5. 금액을 나중에 채우면 위험도 다시 계산 (사용자 요청)
+
+- 서버 `amount`: 금액을 채운 뒤 `ipp_risk_reassess` — check 때 원시 값에서 금액과 금액 비율(check 시각 기준)만 바꿔 다시 계산하고, 응답에 `risk_updated`와 `risk_*` 칸(check와 같음)
+- 기록 `ipp/sql/011_block_log_risk_update.sql`: 새 값은 `bl_risk*`, check 때 값은 `bl_risk_first`, `bl_risk_level_first`, `bl_risk_reasons_first`, 다시 계산한 시각 `bl_risk_updated_datetime` (NULL = 다시 계산 안 함). 처음 값은 한 번만 옮긴다. 개인 DB에 두 번 실행 오류 없음
+- check 때 위험도가 없었던 기록(모델 꺼짐/없음)은 금액만 채우고 `risk: null`, `risk_updated: false`
+- 데스크톱: 떠 있는 '확인 중' 팝업에 금액을 채우면 응답의 위험도로 배지·제목·부제·이유를 다시 그린다 (`popup_model.apply_risk`, `ImpulsePopup.update_risk`). 결정 뒤나 버튼 요청 중이면 그대로. 위험도가 없는 응답이면 그대로
+- 테스트: HTTP 38개 (금액 채움 9개 추가: 새 원시 값, Python과 같은 새 위험도, 처음 값 보존, 두 번째 amount 409, 모델 없던 기록), 데스크톱 `test_risk.py` 27개(+6) → unittest 297개, PHP 107개
+- 실제 서버(8001)에서 데스크톱 Client로: 금액 모름 0.391 보통 → 150,000원 채움 0.436 보통, 기록 처음 값 0.3910 보존
 
 ### 남은 이슈
 

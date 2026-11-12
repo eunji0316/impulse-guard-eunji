@@ -433,8 +433,12 @@ class App:
                 return False
             amount, window = a.amount, p.window
             self.ui.post(lambda: window.fill_price(amount, seq))
-            self.log.event('auto', a, dup='same', action='fill', ocr_sec=ocr_sec,
-                           note='팝업 금액 채움, ' + self._send_amount(p.order))
+            note, data = self._send_amount(p.order)
+            if data is not None and data.get('risk_updated') and popup_model.risk_style(data) is not None:
+                # C-2: 서버가 채운 금액으로 위험도를 다시 계산했다 → 팝업의 배지·제목·부제·이유도 새 값으로
+                self.ui.post(lambda: window.update_risk(data))
+                note += ', 위험도 다시 계산 ' + popup_model.risk_note(data)
+            self.log.event('auto', a, dup='same', action='fill', ocr_sec=ocr_sec, note='팝업 금액 채움, ' + note)
             return True
         except Exception as e:
             print(f"!!! 결제 금액 확인 중 오류가 발생했습니다: {e}")
@@ -558,7 +562,7 @@ class App:
             if v.order.decision:
                 note += f', 결정: {v.order.decision}'
             if v.filled:
-                note += f', 금액 확인 {v.order.amount:,}원 (같은 주문 기록에 채움, {self._send_amount(v.order)})'
+                note += f', 금액 확인 {v.order.amount:,}원 (같은 주문 기록에 채움, {self._amount_note(v.order)})'
             self.log.event('auto', a, dup=v.reason, ocr_sec=ocr_sec, note=note)
             return False
         return self._checkout_popup(a, v.order, ocr_sec)
@@ -622,23 +626,32 @@ class App:
             order.bl_id = int(bl_id)
         order.price_sent = bool(amount)
 
+    def _amount_note(self, order):
+        """팝업이 닫힌 뒤 같은 주문에서 금액을 읽었을 때: 서버 기록만 채우고 로그 문구를 돌려준다
+        (서버가 다시 계산한 위험도는 기록에 남고, 보여 줄 팝업이 없으므로 로그에만)"""
+        note, data = self._send_amount(order)
+        if data is not None and data.get('risk_updated'):
+            note += ', 위험도 다시 계산 ' + popup_model.risk_note(data)
+        return note
+
     def _send_amount(self, order):
-        """나중에 읽은 금액을 서버 감지 기록(금액 0)에 채운다 (amount action). 로그에 붙일 문구를 돌려준다"""
+        """나중에 읽은 금액을 서버 감지 기록(금액 0)에 채운다 (amount action).
+        (로그에 붙일 문구, 서버 응답 data 또는 None). C-2: 응답에 다시 계산한 위험도(risk_*, risk_updated)가 온다"""
         if not order.bl_id:
-            return '서버 감지 기록 없음'
+            return '서버 감지 기록 없음', None
         if order.price_sent:
-            return '서버 감지 기록에는 이미 금액 있음'
+            return '서버 감지 기록에는 이미 금액 있음', None
         try:
             r = self.client.fill_amount(order.bl_id, order.amount)
         except Exception as e:                    # 서버 요청이 실패해도 팝업 금액 채우기는 그대로
-            return f'서버 감지 기록에 금액을 채우지 못함 ({e})'
+            return f'서버 감지 기록에 금액을 채우지 못함 ({e})', None
         if r.ok:
             order.price_sent = True
-            return f'서버 감지 기록 {order.bl_id}번에 금액 채움'
+            return f'서버 감지 기록 {order.bl_id}번에 금액 채움', r.data
         if r.status == 409:
             order.price_sent = True              # 이미 금액이 있거나 결제 화면 기록이 아님: 다시 보내지 않는다
-            return f'서버 감지 기록 {order.bl_id}번은 채우지 않음 ({r.msg})'
-        return f'서버 감지 기록에 금액을 채우지 못함 ({r.msg or "서버 연결 안 됨"}). 다음에 금액을 읽으면 다시 보냄'
+            return f'서버 감지 기록 {order.bl_id}번은 채우지 않음 ({r.msg})', None
+        return f'서버 감지 기록에 금액을 채우지 못함 ({r.msg or "서버 연결 안 됨"}). 다음에 금액을 읽으면 다시 보냄', None
 
     def _item_name(self, a):
         """상품명. 결제 화면은 같은 쇼핑몰에서 최근(30분) 본 상품 → 결제 화면에서 읽은 이름 → '쇼핑몰 이름 주문' 순서

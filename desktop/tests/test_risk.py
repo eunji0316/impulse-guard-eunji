@@ -5,6 +5,7 @@
 - popup_model: 위험 단계별 제목·배지·문구, 이유는 보통 이상만, risk가 없으면 예전 팝업 그대로
 - popup: 배지와 제목 색 (실제 tkinter 창)
 - main.App: 상품 화면 → 결제 화면에서 서버에 보낸 features, 팝업, 로그
+- 금액을 나중에 채우면 서버(amount)가 다시 계산한 위험도로 팝업 배지·제목·부제·이유를 바꾼다
 실행 (desktop 폴더에서): .venv\\Scripts\\python.exe -m unittest discover -s tests -v
 """
 import dataclasses
@@ -13,6 +14,9 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
+
+import numpy as np
 
 import cache
 import checkout_samples as cs
@@ -190,6 +194,33 @@ class TestBuildRisk(unittest.TestCase):
         _, v = self.build(d, self.product)
         self.assertEqual((v.risk_badge, v.reasons), ('', ['큰 금액']))
 
+    def pending_view(self, data):
+        a = dataclasses.replace(self.checkout, page=dataclasses.replace(self.checkout.page, checkout_total=None, total_label=''))
+        return popup_model.build(a, ApiResult(True, data))[1]
+
+    def test_apply_risk(self):
+        """낮음(금액 모름) → 금액을 채운 뒤 높음: 제목·부제·배지·이유가 바뀌고 '확인 중' 안내는 그대로 둔다"""
+        d = risk_result('low', 0.2)
+        d['reasons'] = d['reasons'] + [{'code': 'keyword', 'text': "'특가' 키워드"}]
+        v = self.pending_view(d)
+        self.assertEqual(v.reasons, [popup_model.CHECKOUT_PENDING_REASON])
+        self.assertTrue(popup_model.apply_risk(v, {'risk_updated': True, **risk_result('high', 0.7)}))
+        self.assertEqual((v.title, v.risk_level, v.risk_badge, v.risk, v.risk_updated),
+                         (config.POPUP_RISK_STYLES['high'][0], 'high', '위험 높음', 0.7, True))
+        self.assertEqual(v.subtitle, '충동구매일 가능성이 높아 보여요.')
+        self.assertEqual(v.reasons, ["'특가' 키워드", RISK_REASONS[0]['text'], RISK_REASONS[1]['text'],
+                                     popup_model.CHECKOUT_PENDING_REASON])
+        self.assertTrue(popup_model.apply_risk(v, risk_result('low', 0.1)))     # 낮아지면 이유를 다시 숨긴다
+        self.assertEqual(v.reasons, [popup_model.CHECKOUT_PENDING_REASON])
+
+    def test_apply_risk_without_risk_keeps_view(self):
+        """amount 응답에 위험도가 없으면(예전 서버, check 때 모델 없음) 처음 내용 그대로"""
+        v = self.pending_view(risk_result('mid', 0.4))
+        before = dataclasses.replace(v)
+        for data in ({'ok': True, 'bl_id': 200, 'price': 49600}, {'risk': None, 'risk_level': '', 'risk_updated': False}):
+            self.assertFalse(popup_model.apply_risk(v, data))
+            self.assertEqual(v, before)
+
     def test_risk_note(self):
         self.assertEqual(popup_model.risk_note(risk_result('high', 0.6512)),
                          '위험도 0.65 높음 (amount_ratio,history,frequency)')
@@ -214,6 +245,37 @@ class TestPopupRisk(TkCase):
             self.assertEqual(w.title_label.cget('fg'), fg)
             with quiet():
                 w.destroy()
+
+    def test_update_risk_redraws(self):
+        """떠 있는 팝업이 다시 계산한 위험도로 배지·제목 색·부제·이유 줄을 바꾼다"""
+        w = self.open(risk_result('low', 0.2))
+        self.assertEqual(w.reason_labels, [])
+        self.assertTrue(w.update_risk(risk_result('high', 0.7)))
+        self.root.update()
+        _, badge, fg, bg = config.POPUP_RISK_STYLES['high']
+        self.assertEqual((w.badge_label.cget('text').strip(), w.badge_label.cget('fg'), w.badge_label.cget('bg')), (badge, fg, bg))
+        self.assertEqual((w.title_label.cget('text'), w.title_label.cget('fg')), (config.POPUP_RISK_STYLES['high'][0], fg))
+        self.assertEqual(w.subtitle_label.cget('text'), '충동구매일 가능성이 높아 보여요.')
+        self.assertEqual([lb.reason for lb in w.reason_labels], [r['text'] for r in RISK_REASONS])
+        # 이유 줄은 포인트 줄 위에 있다
+        order = w.ask.pack_slaves()
+        self.assertLess(order.index(w.reason_labels[-1]), order.index(w.point_label))
+        self.assertFalse(w.update_risk({'risk': None}))                   # 위험도 없는 응답은 무시
+        w.done = True
+        self.assertFalse(w.update_risk(risk_result('low', 0.1)))          # 결정 뒤(결과 화면)에는 바꾸지 않음
+        self.assertEqual(w.view.risk_level, 'high')
+        with quiet():
+            w.destroy()
+
+    def test_update_risk_adds_badge_to_old_popup(self):
+        """처음엔 위험도가 없던 팝업도 다시 계산한 위험도를 받으면 배지를 단다"""
+        w = self.open(CHECKOUT_RESULT)
+        self.assertTrue(w.update_risk(risk_result('mid', 0.4)))
+        self.root.update()
+        self.assertEqual(w.badge_label.cget('text').strip(), '위험 보통')
+        self.assertLess(w.ask.pack_slaves().index(w.badge_label), w.ask.pack_slaves().index(w.title_label))
+        with quiet():
+            w.destroy()
 
     def test_old_popup_has_no_badge(self):
         w = self.open(CHECKOUT_RESULT)
@@ -279,6 +341,50 @@ class TestAppRisk(TkCase):
         self.assertIn('머문 시간 95초', log)
         with quiet():
             app.window.destroy()
+            self.pump(lambda: app.window is None)
+
+    def pending_popup(self, amount_response):
+        self.fake = FakeServer(setting=(200, NOT_BLOCKING), check=(200, risk_result('low', 0.2, bl_id=200)),
+                               amount=(200, amount_response))
+        client, _ = make(self.fake)
+        client.connect()
+        client.get_setting()
+        self.clock = Clock()
+        app = main.App(client, self.host, settings=server_client.auto_settings(), log=self.log, clock=self.clock)
+        a = dataclasses.replace(self.checkout, page=dataclasses.replace(self.checkout.page, checkout_total=None, total_label=''))
+        self.assertTrue(self.run_auto(app, a, H1))
+        self.assertTrue(app.window.view.pending)
+        self.assertEqual(app.window.view.risk_level, 'low')
+        app.analyze_frame = lambda img: dataclasses.replace(self.checkout)
+        with mock.patch.object(main.capture, 'monitor_origin', return_value=(0, 0)):
+            self.assertTrue(app.run_amount(np.zeros((900, 1600, 3), np.uint8), 999, None))
+        self.assertTrue(self.pump(lambda: app.window.view.price > 0))
+        return app
+
+    def test_amount_fill_updates_risk(self):
+        """'확인 중'(낮음) 팝업에 금액을 채우면 서버가 다시 계산한 위험도(높음)로 배지·이유가 바뀐다"""
+        resp = {'ok': True, 'bl_id': 200, 'price': 49600, 'risk_updated': True, **{k: v for k, v in risk_result('high', 0.72).items()
+                                                                                   if k.startswith('risk')}}
+        app = self.pending_popup(resp)
+        self.assertTrue(self.pump(lambda: app.window.view.risk_level == 'high'))
+        w = app.window
+        self.assertEqual(w.badge_label.cget('text').strip(), '위험 높음')
+        self.assertEqual([lb.reason for lb in w.reason_labels], [r['text'] for r in RISK_REASONS])
+        self.assertEqual(w.price_label['text'], '49,600원')
+        self.assertIn('위험도 다시 계산 위험도 0.72 높음', self.log_text())
+        with quiet():
+            w.destroy()
+            self.pump(lambda: app.window is None)
+
+    def test_amount_fill_without_risk_keeps_popup(self):
+        """amount 응답에 위험도가 없으면(risk_updated false) 금액만 채우고 위험도 표시는 그대로"""
+        app = self.pending_popup({'ok': True, 'bl_id': 200, 'price': 49600, 'risk_updated': False, 'risk': None, 'risk_level': ''})
+        self.pump(lambda: False, timeout=0.2)
+        w = app.window
+        self.assertEqual((w.view.risk_level, w.view.risk_updated, w.badge_label.cget('text').strip()), ('low', False, '위험 낮음'))
+        self.assertNotIn('위험도 다시 계산', self.log_text())
+        with quiet():
+            w.destroy()
             self.pump(lambda: app.window is None)
 
     def test_old_server_popup_unchanged(self):
