@@ -1,0 +1,975 @@
+{
+ "format": "risk-logreg/1",
+ "version": "20261113-synthetic",
+ "meta": {
+  "trained": "2026-11-13",
+  "rows": 5480,
+  "C": 1.0,
+  "data": "ai/data/risk/synthetic.csv",
+  "note": "가상 데이터로 학습. 실제 사용자 성능의 증거가 아님 (ai/risk/README.md)"
+ },
+ "raw_fields": [
+  "hour",
+  "weekday",
+  "days_since_payday",
+  "amount",
+  "discount_rate",
+  "pressure",
+  "product_views_24h",
+  "same_item_views_24h",
+  "browse_sec",
+  "amount_ratio",
+  "checkouts_7d",
+  "buy_rate",
+  "cooldown_fail_rate"
+ ],
+ "raw_params": {
+  "payday": 25,
+  "ratio_window_days": 90,
+  "ratio_min_count": 3,
+  "checkouts_window_days": 7,
+  "history_window_days": 180,
+  "history_prior": 0.35,
+  "history_weight": 3,
+  "cooldown_prior": 0.25,
+  "cooldown_weight": 3
+ },
+ "features": [
+  {
+   "name": "night",
+   "raw": "hour",
+   "kind": "flag_hour",
+   "hours": [
+    23,
+    0,
+    1,
+    2,
+    3
+   ],
+   "group": "night",
+   "mean": 0.189964,
+   "std": 0.392272
+  },
+  {
+   "name": "late_evening",
+   "raw": "hour",
+   "kind": "flag_hour",
+   "hours": [
+    21,
+    22
+   ],
+   "group": "evening",
+   "mean": 0.168978,
+   "std": 0.374733
+  },
+  {
+   "name": "weekend",
+   "raw": "weekday",
+   "kind": "flag_ge",
+   "value": 5,
+   "group": "weekend",
+   "mean": 0.287591,
+   "std": 0.45264
+  },
+  {
+   "name": "payday",
+   "raw": "days_since_payday",
+   "kind": "flag_le",
+   "value": 5,
+   "group": "payday",
+   "mean": 0.185219,
+   "std": 0.388475
+  },
+  {
+   "name": "log_amount",
+   "raw": "amount",
+   "kind": "log",
+   "scale": 10000,
+   "clip": [
+    -3,
+    4
+   ],
+   "group": "amount",
+   "mean": 1.447123,
+   "std": 0.883364
+  },
+  {
+   "name": "log_ratio",
+   "raw": "amount_ratio",
+   "kind": "log",
+   "scale": 1,
+   "clip": [
+    -3,
+    3
+   ],
+   "group": "amount_ratio",
+   "mean": -0.176333,
+   "std": 0.729168
+  },
+  {
+   "name": "amount_unknown",
+   "raw": "amount",
+   "kind": "missing",
+   "group": null,
+   "mean": 0.099635,
+   "std": 0.299513
+  },
+  {
+   "name": "discount",
+   "raw": "discount_rate",
+   "kind": "linear",
+   "scale": 100,
+   "clip": [
+    0,
+    0.99
+   ],
+   "group": "discount",
+   "mean": 0.212162,
+   "std": 0.212882
+  },
+  {
+   "name": "discount_unknown",
+   "raw": "discount_rate",
+   "kind": "missing",
+   "group": null,
+   "mean": 0.396533,
+   "std": 0.489177
+  },
+  {
+   "name": "pressure",
+   "raw": "pressure",
+   "kind": "flag_ge",
+   "value": 1,
+   "group": "pressure",
+   "mean": 0.201095,
+   "std": 0.400819
+  },
+  {
+   "name": "log_views",
+   "raw": "product_views_24h",
+   "kind": "log1p",
+   "clip": [
+    0,
+    4
+   ],
+   "group": "views",
+   "mean": 1.545893,
+   "std": 0.582418
+  },
+  {
+   "name": "log_same_item",
+   "raw": "same_item_views_24h",
+   "kind": "log1p",
+   "clip": [
+    0,
+    3
+   ],
+   "group": "same_item",
+   "mean": 0.733176,
+   "std": 0.431993
+  },
+  {
+   "name": "log_browse",
+   "raw": "browse_sec",
+   "kind": "log",
+   "scale": 60,
+   "clip": [
+    -3,
+    4
+   ],
+   "group": "browse",
+   "mean": 1.389181,
+   "std": 1.108211
+  },
+  {
+   "name": "browse_unknown",
+   "raw": "browse_sec",
+   "kind": "missing",
+   "group": null,
+   "mean": 0.194161,
+   "std": 0.395553
+  },
+  {
+   "name": "log_checkouts",
+   "raw": "checkouts_7d",
+   "kind": "log1p",
+   "clip": [
+    0,
+    4
+   ],
+   "group": "frequency",
+   "mean": 0.603646,
+   "std": 0.539016
+  },
+  {
+   "name": "buy_rate",
+   "raw": "buy_rate",
+   "kind": "linear",
+   "scale": 1,
+   "clip": [
+    0,
+    1
+   ],
+   "group": "history",
+   "mean": 0.357095,
+   "std": 0.145006
+  },
+  {
+   "name": "cooldown_fail",
+   "raw": "cooldown_fail_rate",
+   "kind": "linear",
+   "scale": 1,
+   "clip": [
+    0,
+    1
+   ],
+   "group": "cooldown",
+   "mean": 0.234467,
+   "std": 0.111862
+  }
+ ],
+ "coef": [
+  0.380136,
+  0.127107,
+  0.080026,
+  0.05879,
+  -0.085088,
+  0.515407,
+  -0.054789,
+  0.290307,
+  -0.031438,
+  0.158289,
+  0.161659,
+  0.169048,
+  -0.182288,
+  0.094224,
+  0.143175,
+  0.401887,
+  0.031074
+ ],
+ "intercept": -0.709775,
+ "reason_min": 0.15,
+ "tests": [
+  {
+   "raw": {
+    "hour": 5,
+    "weekday": 2,
+    "days_since_payday": 15,
+    "amount": null,
+    "discount_rate": 0,
+    "pressure": 1,
+    "product_views_24h": 4,
+    "same_item_views_24h": 3,
+    "browse_sec": 73,
+    "amount_ratio": null,
+    "checkouts_7d": 3,
+    "buy_rate": 0.2611,
+    "cooldown_fail_rate": 0.0536
+   },
+   "prob": 0.304007,
+   "reasons": [
+    "pressure",
+    "same_item",
+    "frequency",
+    "browse"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 15,
+    "weekday": 2,
+    "days_since_payday": 11,
+    "amount": 12140,
+    "discount_rate": null,
+    "pressure": 0,
+    "product_views_24h": 4,
+    "same_item_views_24h": 2,
+    "browse_sec": 170,
+    "amount_ratio": 0.5725,
+    "checkouts_7d": 3,
+    "buy_rate": 0.5042,
+    "cooldown_fail_rate": 0.25
+   },
+   "prob": 0.380503,
+   "reasons": [
+    "history",
+    "frequency"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 2,
+    "weekday": 5,
+    "days_since_payday": 23,
+    "amount": 33110,
+    "discount_rate": 0,
+    "pressure": 0,
+    "product_views_24h": 3,
+    "same_item_views_24h": 3,
+    "browse_sec": 212,
+    "amount_ratio": 1.1001,
+    "checkouts_7d": 3,
+    "buy_rate": 0.322,
+    "cooldown_fail_rate": 0.0682
+   },
+   "prob": 0.563963,
+   "reasons": [
+    "night",
+    "same_item",
+    "frequency",
+    "amount_ratio"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 12,
+    "weekday": 2,
+    "days_since_payday": 7,
+    "amount": 15440,
+    "discount_rate": null,
+    "pressure": 0,
+    "product_views_24h": 13,
+    "same_item_views_24h": 0,
+    "browse_sec": null,
+    "amount_ratio": 0.7585,
+    "checkouts_7d": 1,
+    "buy_rate": 0.35,
+    "cooldown_fail_rate": 0.25
+   },
+   "prob": 0.29187,
+   "reasons": [
+    "views"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 18,
+    "weekday": 1,
+    "days_since_payday": 10,
+    "amount": 31060,
+    "discount_rate": 0,
+    "pressure": 0,
+    "product_views_24h": 6,
+    "same_item_views_24h": 1,
+    "browse_sec": 151,
+    "amount_ratio": 0.6081,
+    "checkouts_7d": 1,
+    "buy_rate": 0.2893,
+    "cooldown_fail_rate": 0.15
+   },
+   "prob": 0.16609,
+   "reasons": []
+  },
+  {
+   "raw": {
+    "hour": 17,
+    "weekday": 4,
+    "days_since_payday": 27,
+    "amount": 75620,
+    "discount_rate": null,
+    "pressure": 0,
+    "product_views_24h": 9,
+    "same_item_views_24h": 0,
+    "browse_sec": null,
+    "amount_ratio": 2.0561,
+    "checkouts_7d": 1,
+    "buy_rate": 0.2893,
+    "cooldown_fail_rate": 0.1944
+   },
+   "prob": 0.351708,
+   "reasons": [
+    "amount_ratio",
+    "views"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 18,
+    "weekday": 3,
+    "days_since_payday": 16,
+    "amount": 24780,
+    "discount_rate": 0,
+    "pressure": 0,
+    "product_views_24h": 7,
+    "same_item_views_24h": 3,
+    "browse_sec": 80,
+    "amount_ratio": 0.2081,
+    "checkouts_7d": 1,
+    "buy_rate": 0.1578,
+    "cooldown_fail_rate": 0.1167
+   },
+   "prob": 0.09024,
+   "reasons": [
+    "same_item",
+    "browse"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 15,
+    "weekday": 6,
+    "days_since_payday": 1,
+    "amount": 43670,
+    "discount_rate": 24,
+    "pressure": 0,
+    "product_views_24h": 5,
+    "same_item_views_24h": 1,
+    "browse_sec": 802,
+    "amount_ratio": 1.3418,
+    "checkouts_7d": 0,
+    "buy_rate": 0.2893,
+    "cooldown_fail_rate": 0.1591
+   },
+   "prob": 0.282799,
+   "reasons": [
+    "amount_ratio"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 0,
+    "weekday": 4,
+    "days_since_payday": 3,
+    "amount": 74260,
+    "discount_rate": 43,
+    "pressure": 1,
+    "product_views_24h": 15,
+    "same_item_views_24h": 2,
+    "browse_sec": 192,
+    "amount_ratio": 1.8502,
+    "checkouts_7d": 2,
+    "buy_rate": 0.3833,
+    "cooldown_fail_rate": 0.125
+   },
+   "prob": 0.869954,
+   "reasons": [
+    "night",
+    "amount_ratio",
+    "views",
+    "pressure",
+    "discount"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 23,
+    "weekday": 6,
+    "days_since_payday": 25,
+    "amount": 20220,
+    "discount_rate": null,
+    "pressure": 1,
+    "product_views_24h": 3,
+    "same_item_views_24h": 1,
+    "browse_sec": 150,
+    "amount_ratio": 0.3966,
+    "checkouts_7d": 1,
+    "buy_rate": 0.5062,
+    "cooldown_fail_rate": 0.1875
+   },
+   "prob": 0.586326,
+   "reasons": [
+    "night",
+    "history",
+    "pressure"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 7,
+    "weekday": 0,
+    "days_since_payday": 2,
+    "amount": null,
+    "discount_rate": null,
+    "pressure": 0,
+    "product_views_24h": 1,
+    "same_item_views_24h": 1,
+    "browse_sec": 171,
+    "amount_ratio": null,
+    "checkouts_7d": 4,
+    "buy_rate": 0.082,
+    "cooldown_fail_rate": 0.0536
+   },
+   "prob": 0.124607,
+   "reasons": [
+    "frequency"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 21,
+    "weekday": 4,
+    "days_since_payday": 8,
+    "amount": 39040,
+    "discount_rate": 34,
+    "pressure": 0,
+    "product_views_24h": 9,
+    "same_item_views_24h": 3,
+    "browse_sec": 267,
+    "amount_ratio": 1.0438,
+    "checkouts_7d": 2,
+    "buy_rate": 0.437,
+    "cooldown_fail_rate": 0.2188
+   },
+   "prob": 0.589473,
+   "reasons": [
+    "evening",
+    "same_item",
+    "history",
+    "views",
+    "discount",
+    "amount_ratio"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 13,
+    "weekday": 6,
+    "days_since_payday": 26,
+    "amount": null,
+    "discount_rate": 33,
+    "pressure": 0,
+    "product_views_24h": 1,
+    "same_item_views_24h": 1,
+    "browse_sec": 157,
+    "amount_ratio": null,
+    "checkouts_7d": 2,
+    "buy_rate": 0.5412,
+    "cooldown_fail_rate": 0.3365
+   },
+   "prob": 0.384747,
+   "reasons": [
+    "history",
+    "discount"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 23,
+    "weekday": 1,
+    "days_since_payday": 7,
+    "amount": 76680,
+    "discount_rate": 0,
+    "pressure": 1,
+    "product_views_24h": 3,
+    "same_item_views_24h": 1,
+    "browse_sec": 171,
+    "amount_ratio": 1.2189,
+    "checkouts_7d": 1,
+    "buy_rate": 0.5477,
+    "cooldown_fail_rate": 0.25
+   },
+   "prob": 0.673267,
+   "reasons": [
+    "night",
+    "history",
+    "pressure",
+    "amount_ratio"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 23,
+    "weekday": 5,
+    "days_since_payday": 0,
+    "amount": 16030,
+    "discount_rate": 0,
+    "pressure": 1,
+    "product_views_24h": 4,
+    "same_item_views_24h": 2,
+    "browse_sec": 72,
+    "amount_ratio": 0.5761,
+    "checkouts_7d": 3,
+    "buy_rate": 0.3903,
+    "cooldown_fail_rate": 0.2794
+   },
+   "prob": 0.688068,
+   "reasons": [
+    "night",
+    "pressure",
+    "frequency",
+    "browse"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 19,
+    "weekday": 5,
+    "days_since_payday": 25,
+    "amount": 45950,
+    "discount_rate": 7,
+    "pressure": 0,
+    "product_views_24h": 5,
+    "same_item_views_24h": 4,
+    "browse_sec": 514,
+    "amount_ratio": 1.0428,
+    "checkouts_7d": 5,
+    "buy_rate": 0.2064,
+    "cooldown_fail_rate": 0.2344
+   },
+   "prob": 0.310443,
+   "reasons": [
+    "same_item",
+    "frequency",
+    "amount_ratio"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 0,
+    "weekday": 2,
+    "days_since_payday": 7,
+    "amount": 109750,
+    "discount_rate": null,
+    "pressure": 1,
+    "product_views_24h": 4,
+    "same_item_views_24h": 2,
+    "browse_sec": 235,
+    "amount_ratio": 1.7842,
+    "checkouts_7d": 0,
+    "buy_rate": 0.35,
+    "cooldown_fail_rate": 0.25
+   },
+   "prob": 0.650015,
+   "reasons": [
+    "night",
+    "amount_ratio",
+    "pressure"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 19,
+    "weekday": 2,
+    "days_since_payday": 6,
+    "amount": 33190,
+    "discount_rate": 0,
+    "pressure": 0,
+    "product_views_24h": 1,
+    "same_item_views_24h": 1,
+    "browse_sec": 56,
+    "amount_ratio": 0.5507,
+    "checkouts_7d": 1,
+    "buy_rate": 0.6722,
+    "cooldown_fail_rate": 0.4375
+   },
+   "prob": 0.324417,
+   "reasons": [
+    "history",
+    "browse"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 16,
+    "weekday": 5,
+    "days_since_payday": 14,
+    "amount": 107830,
+    "discount_rate": 40,
+    "pressure": 0,
+    "product_views_24h": 3,
+    "same_item_views_24h": 3,
+    "browse_sec": 139,
+    "amount_ratio": 1.8485,
+    "checkouts_7d": 1,
+    "buy_rate": 0.5875,
+    "cooldown_fail_rate": 0.35
+   },
+   "prob": 0.687019,
+   "reasons": [
+    "history",
+    "amount_ratio",
+    "discount",
+    "same_item"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 18,
+    "weekday": 2,
+    "days_since_payday": 29,
+    "amount": 26300,
+    "discount_rate": null,
+    "pressure": 0,
+    "product_views_24h": 5,
+    "same_item_views_24h": 0,
+    "browse_sec": null,
+    "amount_ratio": 0.5105,
+    "checkouts_7d": 2,
+    "buy_rate": 0.2776,
+    "cooldown_fail_rate": 0.1719
+   },
+   "prob": 0.172598,
+   "reasons": []
+  },
+  {
+   "raw": {
+    "hour": 20,
+    "weekday": 1,
+    "days_since_payday": 14,
+    "amount": 16930,
+    "discount_rate": 14,
+    "pressure": 1,
+    "product_views_24h": 7,
+    "same_item_views_24h": 1,
+    "browse_sec": 183,
+    "amount_ratio": 0.1983,
+    "checkouts_7d": 0,
+    "buy_rate": 0.2132,
+    "cooldown_fail_rate": 0.1944
+   },
+   "prob": 0.1054,
+   "reasons": [
+    "pressure"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 22,
+    "weekday": 3,
+    "days_since_payday": 30,
+    "amount": 83810,
+    "discount_rate": 30,
+    "pressure": 0,
+    "product_views_24h": 5,
+    "same_item_views_24h": 1,
+    "browse_sec": 922,
+    "amount_ratio": 1.4384,
+    "checkouts_7d": 0,
+    "buy_rate": 0.2132,
+    "cooldown_fail_rate": 0.1944
+   },
+   "prob": 0.254371,
+   "reasons": [
+    "amount_ratio",
+    "evening"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 22,
+    "weekday": 6,
+    "days_since_payday": 29,
+    "amount": 19530,
+    "discount_rate": null,
+    "pressure": 0,
+    "product_views_24h": 3,
+    "same_item_views_24h": 1,
+    "browse_sec": 528,
+    "amount_ratio": 0.3089,
+    "checkouts_7d": 0,
+    "buy_rate": 0.41,
+    "cooldown_fail_rate": 0.25
+   },
+   "prob": 0.183972,
+   "reasons": [
+    "evening"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 22,
+    "weekday": 3,
+    "days_since_payday": 29,
+    "amount": 43240,
+    "discount_rate": null,
+    "pressure": 0,
+    "product_views_24h": 12,
+    "same_item_views_24h": 0,
+    "browse_sec": null,
+    "amount_ratio": 1.7328,
+    "checkouts_7d": 0,
+    "buy_rate": 0.41,
+    "cooldown_fail_rate": 0.25
+   },
+   "prob": 0.474833,
+   "reasons": [
+    "amount_ratio",
+    "views",
+    "evening"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 11,
+    "weekday": 4,
+    "days_since_payday": 15,
+    "amount": 101840,
+    "discount_rate": 12,
+    "pressure": 0,
+    "product_views_24h": 8,
+    "same_item_views_24h": 1,
+    "browse_sec": 652,
+    "amount_ratio": 0.7068,
+    "checkouts_7d": 2,
+    "buy_rate": 0.3711,
+    "cooldown_fail_rate": 0.2188
+   },
+   "prob": 0.218344,
+   "reasons": [
+    "views"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 13,
+    "weekday": 2,
+    "days_since_payday": 4,
+    "amount": 33440,
+    "discount_rate": null,
+    "pressure": 0,
+    "product_views_24h": 3,
+    "same_item_views_24h": 1,
+    "browse_sec": 27,
+    "amount_ratio": 0.2919,
+    "checkouts_7d": 1,
+    "buy_rate": 0.2521,
+    "cooldown_fail_rate": 0.175
+   },
+   "prob": 0.150407,
+   "reasons": [
+    "browse"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 18,
+    "weekday": 6,
+    "days_since_payday": 19,
+    "amount": 16510,
+    "discount_rate": 64,
+    "pressure": 0,
+    "product_views_24h": 8,
+    "same_item_views_24h": 3,
+    "browse_sec": 130,
+    "amount_ratio": 0.2539,
+    "checkouts_7d": 1,
+    "buy_rate": 0.5912,
+    "cooldown_fail_rate": 0.4688
+   },
+   "prob": 0.542498,
+   "reasons": [
+    "history",
+    "discount",
+    "same_item",
+    "views"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 10,
+    "weekday": 0,
+    "days_since_payday": 7,
+    "amount": 49910,
+    "discount_rate": 49,
+    "pressure": 1,
+    "product_views_24h": 5,
+    "same_item_views_24h": 2,
+    "browse_sec": 1195,
+    "amount_ratio": 1.1697,
+    "checkouts_7d": 0,
+    "buy_rate": 0.6025,
+    "cooldown_fail_rate": 0.3929
+   },
+   "prob": 0.597066,
+   "reasons": [
+    "history",
+    "discount",
+    "pressure",
+    "amount_ratio"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 2,
+    "weekday": 6,
+    "days_since_payday": 8,
+    "amount": 73970,
+    "discount_rate": 25,
+    "pressure": 0,
+    "product_views_24h": 4,
+    "same_item_views_24h": 1,
+    "browse_sec": 85,
+    "amount_ratio": 0.8451,
+    "checkouts_7d": 0,
+    "buy_rate": 0.21,
+    "cooldown_fail_rate": 0.1875
+   },
+   "prob": 0.408514,
+   "reasons": [
+    "night",
+    "browse"
+   ]
+  },
+  {
+   "raw": {
+    "hour": 18,
+    "weekday": 3,
+    "days_since_payday": 17,
+    "amount": 14330,
+    "discount_rate": 0,
+    "pressure": 1,
+    "product_views_24h": 3,
+    "same_item_views_24h": 1,
+    "browse_sec": 2250,
+    "amount_ratio": 0.7759,
+    "checkouts_7d": 1,
+    "buy_rate": 0.4357,
+    "cooldown_fail_rate": 0.15
+   },
+   "prob": 0.237606,
+   "reasons": [
+    "pressure",
+    "history"
+   ]
+  },
+  {
+   "raw": {
+    "hour": null,
+    "weekday": null,
+    "days_since_payday": null,
+    "amount": null,
+    "discount_rate": null,
+    "pressure": null,
+    "product_views_24h": null,
+    "same_item_views_24h": null,
+    "browse_sec": null,
+    "amount_ratio": null,
+    "checkouts_7d": null,
+    "buy_rate": null,
+    "cooldown_fail_rate": null
+   },
+   "prob": 0.327106,
+   "reasons": []
+  },
+  {
+   "raw": {
+    "hour": 2,
+    "weekday": 2,
+    "days_since_payday": 15,
+    "amount": 900000,
+    "discount_rate": 95,
+    "pressure": 1,
+    "product_views_24h": 500,
+    "same_item_views_24h": 99,
+    "browse_sec": 1,
+    "amount_ratio": 30,
+    "checkouts_7d": 80,
+    "buy_rate": 1,
+    "cooldown_fail_rate": 1
+   },
+   "prob": 0.999785,
+   "reasons": [
+    "amount_ratio",
+    "history",
+    "discount",
+    "frequency",
+    "same_item",
+    "night",
+    "browse",
+    "views",
+    "pressure",
+    "cooldown"
+   ]
+  }
+ ]
+}
