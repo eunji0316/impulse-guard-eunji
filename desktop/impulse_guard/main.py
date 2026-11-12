@@ -338,6 +338,7 @@ class App:
                 site = a.page.site if a.page else ''
                 order = self.orders.see(site, a.amount, a.frame_hash, a.title_key).order
                 view = plan[1]
+                self._link_record(order, view.bl_id, a.amount)
                 actions = popup_model.Actions(self.client, view,
                                               on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
             elif not a.is_checkout:
@@ -407,7 +408,7 @@ class App:
             amount, window = a.amount, p.window
             self.ui.post(lambda: window.fill_price(amount, seq))
             self.log.event('auto', a, dup='same', action='fill', ocr_sec=ocr_sec,
-                           note='팝업 금액 채움 (서버 감지 기록의 금액은 그대로)')
+                           note='팝업 금액 채움, ' + self._send_amount(p.order))
             return True
         except Exception as e:
             print(f"!!! 결제 금액 확인 중 오류가 발생했습니다: {e}")
@@ -531,7 +532,7 @@ class App:
             if v.order.decision:
                 note += f', 결정: {v.order.decision}'
             if v.filled:
-                note += f', 금액 확인 {v.order.amount:,}원 (같은 주문 기록에 채움. 서버 감지 기록은 그대로)'
+                note += f', 금액 확인 {v.order.amount:,}원 (같은 주문 기록에 채움, {self._send_amount(v.order)})'
             self.log.event('auto', a, dup=v.reason, ocr_sec=ocr_sec, note=note)
             return False
         return self._checkout_popup(a, v.order, ocr_sec)
@@ -572,6 +573,7 @@ class App:
         kind, view = plan
         if kind == 'impulse':
             view.item_name = view.api_name = name or view.api_name
+            self._link_record(order, view.bl_id, a.amount)
             actions = popup_model.Actions(self.client, view,
                                           on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
             note = self._popup_note(plan, ', '.join(x for x in (self._server_note(r), extra) if x))
@@ -581,6 +583,34 @@ class App:
             self.log.event('auto', a, action='blocked', ocr_sec=ocr_sec, note=self._server_note(r))
             self._post(lambda: self.show(kind, view, site=site))
         return True
+
+    # ── 서버 감지 기록의 금액 (B-5) ─────────────────────────
+    @staticmethod
+    def _link_record(order, bl_id, amount):
+        """팝업을 띄운 주문에 서버 감지 기록 번호를 잇는다. check 때 금액을 보냈으면 서버 기록에 금액이 있다"""
+        if order is None:
+            return
+        if bl_id:
+            order.bl_id = int(bl_id)
+        order.price_sent = bool(amount)
+
+    def _send_amount(self, order):
+        """나중에 읽은 금액을 서버 감지 기록(금액 0)에 채운다 (amount action). 로그에 붙일 문구를 돌려준다"""
+        if not order.bl_id:
+            return '서버 감지 기록 없음'
+        if order.price_sent:
+            return '서버 감지 기록에는 이미 금액 있음'
+        try:
+            r = self.client.fill_amount(order.bl_id, order.amount)
+        except Exception as e:                    # 서버 요청이 실패해도 팝업 금액 채우기는 그대로
+            return f'서버 감지 기록에 금액을 채우지 못함 ({e})'
+        if r.ok:
+            order.price_sent = True
+            return f'서버 감지 기록 {order.bl_id}번에 금액 채움'
+        if r.status == 409:
+            order.price_sent = True              # 이미 금액이 있거나 결제 화면 기록이 아님: 다시 보내지 않는다
+            return f'서버 감지 기록 {order.bl_id}번은 채우지 않음 ({r.msg})'
+        return f'서버 감지 기록에 금액을 채우지 못함 ({r.msg or "서버 연결 안 됨"}). 다음에 금액을 읽으면 다시 보냄'
 
     def _item_name(self, a):
         """상품명. 결제 화면은 같은 쇼핑몰에서 최근(30분) 본 상품 → 결제 화면에서 읽은 이름 → '쇼핑몰 이름 주문' 순서

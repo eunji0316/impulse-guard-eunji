@@ -630,8 +630,8 @@ class TestHandleAuto(TkCase):
         a = self.checkout
         return dataclasses.replace(a, page=dataclasses.replace(a.page, checkout_total=None, total_label=''))
 
-    def pending_app(self):
-        app = self.make_app(check=(200, CHECKOUT_RESULT))
+    def pending_app(self, amount=(200, {'ok': True, 'bl_id': 200, 'price': 49600})):
+        app = self.make_app(check=(200, CHECKOUT_RESULT), amount=amount)
         a = self.no_amount()
         self.assertEqual(a.amount, 0)
         self.assertTrue(self.handle(app, a, H1))
@@ -661,6 +661,53 @@ class TestHandleAuto(TkCase):
         self.assertTrue((seen[0][cy, cx] == 255).all())
         self.assertIn('팝업 금액 채움', self.log_lines()[-1])
         self.close_window(app)
+
+    # ── 서버 감지 기록에 나중에 읽은 금액 (B-5, amount action) ──
+    def fill_by_amount_round(self, app):
+        app.analyze_frame = lambda img: dataclasses.replace(self.checkout)
+        with mock.patch.object(main.capture, 'monitor_origin', return_value=(0, 0)):
+            self.assertTrue(app.run_amount(np.zeros((900, 1600, 3), np.uint8), H2, None))
+        self.assertTrue(self.pump(lambda: app.window.view.price == 49600))
+
+    def test_filled_amount_sent_to_server_record(self):
+        """확인 중 팝업(check는 금액 0)에 금액을 채우면 같은 감지 기록(bl_id)에 금액을 보낸다. 한 번만"""
+        app = self.pending_app()
+        order = app.pending.order
+        self.assertEqual((order.bl_id, order.price_sent), (200, False))
+        self.assertEqual([b for b in self.fake.calls if b['action'] == 'check'][-1]['price'], 0)
+        self.fill_by_amount_round(app)
+        sent = [b for b in self.fake.calls if b['action'] == 'amount']
+        self.assertEqual([(b['bl_id'], b['price']) for b in sent], [(200, 49600)])
+        self.assertTrue(order.price_sent)
+        self.assertIn('서버 감지 기록 200번에 금액 채움', self.log_lines()[-1])
+        self.close_window(app)
+        app.orders.left()                                 # 나중에 같은 주문을 다시 봐도 다시 보내지 않는다
+        self.handle(app, self.checkout, H1)
+        self.assertEqual(self.fake.count('amount'), 1)
+
+    def test_fill_amount_server_conflict_not_retried(self):
+        app = self.pending_app(amount=(409, {'ok': False, 'msg': '이미 금액이 있거나 찾을 수 없는 결제 화면 감지 기록입니다.'}))
+        self.fill_by_amount_round(app)
+        self.assertIn('채우지 않음', self.log_lines()[-1])
+        self.assertTrue(app.pending is None or app.pending.order.price_sent)
+        self.close_window(app)
+
+    def test_fill_amount_offline_keeps_popup_fill(self):
+        """서버에 못 보내도 팝업 금액은 채우고, 다음에 금액을 읽으면 다시 보낸다"""
+        app = self.pending_app(amount=ConnectionError('down'))
+        order = app.pending.order
+        self.fill_by_amount_round(app)
+        self.assertFalse(order.price_sent)
+        self.assertIn('채우지 못함', self.log_lines()[-1])
+        self.close_window(app)
+
+    def test_known_amount_popup_not_sent_again(self):
+        """check 때 금액을 보낸 주문(금액 팝업)은 amount를 보내지 않는다"""
+        app = self.make_app(check=(200, CHECKOUT_RESULT))
+        self.assertTrue(self.handle(app, self.checkout, H1))
+        self.assertEqual((app.orders.orders[0].bl_id, app.orders.orders[0].price_sent), (200, True))
+        self.close_window(app)
+        self.assertEqual(self.fake.count('amount'), 0)
 
     def test_pending_popup_not_filled_by_other_order(self):
         """팝업이 떠 있는 동안 다른 주문서(탭 제목이 다름)로 가서 읽은 금액은 채우지 않는다"""

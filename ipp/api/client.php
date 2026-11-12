@@ -222,4 +222,18 @@ if ($action === 'decide') {
     ipp_api_json(200, true, array('bl_id' => $bl_id, 'decision' => $decision));
 }
 
+// 결제 화면 감지 기록에 나중에 읽은 금액을 채운다 (B-5)
+// 데스크톱이 금액을 못 읽은 채 check(금액 0)를 하고 '결제 금액 확인 중' 팝업을 띄운 뒤, 화면에서 금액을 읽었을 때 부른다
+// 본인의 데스크톱 결제 화면 detect 기록이고 금액이 0일 때만 한 번 채운다 (팝업 결정과 상관없이)
+if ($action === 'amount') {
+    if (!IPP_USE_SETTING) ipp_api_json(403, false, array('msg' => '차단 설정 기능이 꺼져 있습니다.'));
+    $bl_id = ipp_api_int($body, 'bl_id');
+    $price = ipp_api_int($body, 'price');
+    if ($bl_id <= 0 || $price <= 0) ipp_api_json(400, false, array('msg' => 'bl_id와 금액을 보내 주세요.'));
+    if (!ipp_block_log_fill_price($mb_id, $bl_id, $price)) {
+        ipp_api_json(409, false, array('msg' => '이미 금액이 있거나 찾을 수 없는 결제 화면 감지 기록입니다.'));
+    }
+    ipp_api_json(200, true, array('bl_id' => $bl_id, 'price' => $price));
+}
+
 ipp_api_json(400, false, array('msg' => '알 수 없는 요청입니다.'));

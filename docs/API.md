@@ -84,6 +84,7 @@ Authorization: Bearer 3f9a...(64자리)
 | `cooldown` | 24시간 담아두기 시작. `bl_id`를 주면 그 감지 기록에 `hold` | `g5_ipp_cooldown` (+ `g5_ipp_block_log`) | `IPP_USE_COOLDOWN` |
 | `giveup` | 안 살래요 (즉시 포기, 포인트 지급). `bl_id`를 주면 그 감지 기록에 `giveup` | `g5_ipp_cooldown`, 포인트 (+ `g5_ipp_block_log`) | `IPP_USE_COOLDOWN` |
 | `decide` | 팝업 결정을 기록만 (그래도 구매, 창 닫기, 가격 모를 때 안 살래요). 쿨다운과 포인트 없음 (B-3) | `g5_ipp_block_log` | `IPP_USE_SETTING` |
+| `amount` | 결제 화면 감지 기록(금액 0)에 나중에 읽은 금액을 채움 (B-5) | `g5_ipp_block_log` | `IPP_USE_SETTING` |
 
 #### `me`: 연결 확인
 
@@ -350,6 +351,31 @@ Authorization: Bearer 3f9a...(64자리)
 | `close` | 창의 X (`decide`) | 없음 (포인트 없음) |
 
 `bl_decision_datetime`에 결정한 시각이 저장됩니다.
+
+#### `amount`: 결제 금액 채우기 (B-5 추가)
+
+데스크톱은 결제 화면 맨 위처럼 총 결제금액이 안 보이면 금액 0으로 `check`(`is_checkout: true`)를 하고 '결제 금액 확인 중' 팝업을 띄웁니다. 그 뒤 화면에서 금액을 읽으면 이 action으로 같은 감지 기록에 금액을 채웁니다. 팝업 결정(`bl_decision`)과는 상관없습니다.
+
+요청
+
+```json
+{ "client": "desktop", "action": "amount", "bl_id": 208, "price": 149000 }
+```
+
+| 칸 | 필수 | 값 |
+|---|---|---|
+| `bl_id` | O | `check`가 준 감지 기록 번호 |
+| `price` | O | 화면에서 읽은 결제 금액(원). 1 이상 |
+
+응답
+
+```json
+{ "ok": true, "bl_id": 208, "price": 149000 }
+```
+
+- `bl_id`나 `price`가 없거나 0 이하면 400 `"bl_id와 금액을 보내 주세요."`
+- 다른 회원의 기록, 데스크톱 결제 화면 `detect` 기록이 아닌 것(상품 화면, `blocked`, 확장 프로그램), **이미 금액이 있는 기록**, 없는 기록은 409 `"이미 금액이 있거나 찾을 수 없는 결제 화면 감지 기록입니다."` (금액은 한 번만 채우고 바꾸지 않습니다)
+- 채우면 `bl_price`와 `bl_price_filled_datetime`(채운 시각, `ipp/sql/009_block_log_price_fill.sql`)이 저장됩니다. `bl_price_filled_datetime`이 NULL이면 `check` 때 받은 금액(또는 끝내 모름)입니다. C단계 학습 데이터에서 둘을 구분할 때 씁니다.
 
 ### 2-4. 호출 예시
 

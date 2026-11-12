@@ -225,6 +225,10 @@ class Client:
         """안 살래요: 즉시 포기 + 포인트 지급 + 감지 기록에 giveup. data: cd_id, point"""
         return self.call('giveup', item_name=item_name, price=int(price or 0), bl_id=int(bl_id or 0))
 
+    def fill_amount(self, bl_id, price):
+        """결제 화면 감지 기록(금액 0)에 나중에 읽은 금액을 채운다 (B-5). 이미 금액이 있으면 409"""
+        return self.call('amount', bl_id=int(bl_id or 0), price=int(price or 0))
+
     def decide(self, bl_id, decision):
         """기록만 남기는 결정: buy(그래도 구매), close(창 닫기), giveup(가격을 몰라 포인트 없이 포기)"""
         return self.call('decide', bl_id=int(bl_id or 0), decision=decision)

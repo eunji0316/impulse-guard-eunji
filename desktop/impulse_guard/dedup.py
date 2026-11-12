@@ -52,8 +52,9 @@ class SeenOrder:
     last_seen: float
     count: int = 1               # 본 횟수
     decision: str = ''           # 팝업 결정: hold, giveup, buy, close ('' = 아직)
-    bl_id: int = 0
+    bl_id: int = 0               # 서버 감지 기록 번호 (check가 준 값. 팝업을 띄운 주문만)
     title: TitleKey = None       # 탭 제목 해시 (모르면 None)
+    price_sent: bool = False     # 서버 감지 기록에 금액이 있다 (check 때 보냈거나 나중에 amount로 채움)
 
     @property
     def key(self):
