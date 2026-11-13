@@ -52,6 +52,47 @@ include_once(G5_PATH.'/head.php');
     </div>
 </div>
 
+<?php if (defined('IPP_USE_LLM') && IPP_USE_LLM) { // 5 LLM 주간 리포트 요약: 버튼을 눌렀을 때만 부른다 (php -S가 요청을 하나씩 처리해 기다리는 동안 다른 요청도 멈추므로) ?>
+<div id="ipp-ai-report" style="border:1px solid #c7d2fe;background:#f5f7ff;border-radius:8px;padding:14px;margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <strong>이번 주 AI 요약</strong>
+        <button type="button" id="ipp-ai-report-btn" class="btn btn_02">AI 요약 보기</button>
+    </div>
+    <div id="ipp-ai-report-body" style="margin-top:8px;display:none;">
+        <div id="ipp-ai-headline" style="font-weight:bold;font-size:16px;"></div>
+        <p id="ipp-ai-summary" style="margin:6px 0;"></p>
+        <p id="ipp-ai-tip" style="margin:0;color:#3730a3;"></p>
+    </div>
+    <div id="ipp-ai-report-msg" style="margin-top:8px;color:#888;font-size:13px;"></div>
+    <div style="margin-top:6px;color:#999;font-size:11px;">최근 2주 집계 숫자만 Claude API로 보내 요약해요. 쇼핑몰 이름, 상품명, 아이디는 보내지 않고 요약은 저장하지 않아요.</div>
+</div>
+<script>
+(function () {
+    var btn = document.getElementById('ipp-ai-report-btn');
+    var msg = document.getElementById('ipp-ai-report-msg');
+    btn.addEventListener('click', function () {
+        btn.disabled = true;
+        msg.textContent = '요약을 만드는 중이에요...';
+        fetch('<?php echo IPP_URL; ?>/api/report.php', {method: 'POST', credentials: 'same-origin'})
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.ok && d.summary) {
+                    document.getElementById('ipp-ai-headline').textContent = d.summary.headline;
+                    document.getElementById('ipp-ai-summary').textContent = d.summary.summary;
+                    document.getElementById('ipp-ai-tip').textContent = '💡 ' + d.summary.tip;
+                    document.getElementById('ipp-ai-report-body').style.display = '';
+                    msg.textContent = '';
+                } else {
+                    msg.textContent = d.msg || '지금은 요약을 만들 수 없어요.';
+                }
+            })
+            .catch(function () { msg.textContent = '지금은 요약을 만들 수 없어요.'; })
+            .then(function () { btn.disabled = false; });
+    });
+})();
+</script>
+<?php } ?>
+
 <h3>일별 차단 횟수</h3>
 <table style="width:100%;border-collapse:collapse;" border="1" cellpadding="6">
     <tr><th>날짜</th><th>차단</th></tr>
