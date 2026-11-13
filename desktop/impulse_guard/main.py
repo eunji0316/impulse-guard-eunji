@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass
 
 from . import capture, config, frame, ocr, popup_model, timing
-from .dedup import NoticeGate, RecentOrders, title_key
+from .dedup import titles_differ, NoticeGate, RecentOrders, title_key
 from .detect_log import DetectLog, NullLog
 from .detector import classifier, page as page_info, price, shopping, stage as stage_mod
 from .popup_model import hms as _hms
@@ -583,9 +583,17 @@ class App:
         if w is not None:
             return self._handle_waiting(w, a, site, frame_hash, ocr_sec)
         v = self.orders.see(site, a.amount, frame_hash, a.title_key)
-        if not v.is_dup and not a.amount and self.orders.recent_known(site, exclude=v.order) is not None:
-            # 같은 쇼핑몰의 최근 주문(금액 있음)에 다시 들어온 것일 수 있다 (주문서 주소가 새로 생겨 제목으로 구분 못 함).
-            # 금액을 읽을 때까지 팝업을 미룬다. 못 읽으면 CHECKOUT_AMOUNT_WAIT_SEC 뒤 '확인 중' 팝업
+        recent = self.orders.recent_known(site, exclude=v.order) if not v.is_dup and not a.amount else None
+        if recent is not None and titles_differ(a.title_key, recent.title):
+            # C-2: 창 제목(해시)이 최근 주문과 분명히 다르면 다른 주문이다. 기다리지 않고 바로 '확인 중' 팝업
+            recent = None
+            extra_note = '금액 모름이지만 창 제목이 최근 주문과 달라 기다리지 않음'
+        else:
+            extra_note = ''
+        if recent is not None:
+            # 같은 쇼핑몰의 최근 주문(금액 있음)에 다시 들어온 것일 수 있고 제목으로 구분할 수 없다
+            # (제목 모름, 같은 제목, 주문서 번호가 든 제목: 지그재그는 '구매하기'마다 주문서 주소가 새로 생긴다).
+            # 금액을 읽을 때까지 팝업을 미룬다. 못 읽으면 CHECKOUT_AMOUNT_WAIT_SEC(1.5초) 뒤 '확인 중' 팝업
             t = timing.current()
             self.waiting = AmountWait(v.order, self.clock(), a,
                                       detected_at=(t.detected_at if t.detected_at is not None else t.started_at) if t else None,
@@ -604,7 +612,7 @@ class App:
                 note += f', 금액 확인 {v.order.amount:,}원 (같은 주문 기록에 채움, {self._amount_note(v.order)})'
             self.log.event('auto', a, dup=v.reason, ocr_sec=ocr_sec, note=note)
             return False
-        return self._checkout_popup(a, v.order, ocr_sec)
+        return self._checkout_popup(a, v.order, ocr_sec, extra_note)
 
     def _handle_waiting(self, w, a, site, frame_hash, ocr_sec):
         """금액을 기다리던 결제 화면의 다음 분석"""

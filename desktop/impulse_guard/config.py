@@ -274,7 +274,8 @@ CONSOLE_TITLE = 'impulse-guard 감지 프로그램'   # 콘솔 창 제목. 맨 �
 OWN_WINDOW_TITLES = ['충동구매 방지', '충동구매 알림', '쇼핑 차단 중']
 # 결제 화면인데 금액을 못 읽었고 같은 쇼핑몰의 최근 주문(금액 있음)이 있으면, 같은 주문인지 금액을 읽을 때까지
 # 이 시간만큼 팝업을 미룬다 (B-5. 지그재그는 '구매하기'마다 주문서 주소(탭 제목)가 새로 생겨 제목으로는 구분할 수 없다)
-CHECKOUT_AMOUNT_WAIT_SEC = 3
+# C-2: 창 제목이 최근 주문과 분명히 다르면(dedup.titles_differ) 기다리지 않는다. 시간은 3초 → 1.5초
+CHECKOUT_AMOUNT_WAIT_SEC = 1.5
 # 로그 (desktop 폴더 기준, Git에 올리지 않음). 캡처 이미지는 어디에도 저장하지 않는다
 LOG_DIR = 'logs'
 LOG_FILE = 'detect.log'          # 감지 결과 한 줄씩 (1MB × 5개 순환)
