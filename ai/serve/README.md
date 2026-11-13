@@ -13,7 +13,7 @@ C-2 위험도 모델(`ipp/model/risk_model.json`)을 API로 제공한다. 그누
 - 모델이 로지스틱 회귀라 PHP로도 같은 값을 낼 수 있다. 그래서 예측 서버는 **꺼져 있어도 되는 부품**으로 두고, 기본값은 꺼짐(`IPP_RISK_SERVER = 'off'`)이다
 - 계산은 기준 구현 `ai/risk/model.py`를 그대로 불러 쓴다. 학습 코드와 서비스 코드가 같은 계산 규칙을 쓴다
 - 단계 기준(0.3/0.55), 문구, 이유 문장, DB 조회는 PHP에만 둔다 (기준값이 두 곳에 생기지 않게)
-- 5단계 LLM 문구, PHP로 옮기기 어려운 모델(부스팅 등)도 이 서버에 서비스로 붙인다
+- 5 LLM 주간 리포트 요약(`/message/weekly`, 아래 절)도 이 서버에 서비스로 붙였다. PHP로 옮기기 어려운 모델(부스팅 등)도 같은 방식으로 붙인다
 
 ## 켜기와 끄기
 
@@ -51,6 +51,7 @@ C-2 위험도 모델(`ipp/model/risk_model.json`)을 API로 제공한다. 그누
 |---|---|---|
 | `GET /health` | - | `{"services": {"risk": {"model": "20261113-synthetic", "format": "risk-logreg/1"}}}` (모델이 없으면 `"risk": null`) |
 | `POST /risk/predict` | `{"raw": {"hour": 23, "amount": 89000, "discount_rate": null, ...}}` | `{"prob": 0.6979, "reasons": [["amount_ratio", 0.8123], ...], "model": "20261113-synthetic"}` |
+| `POST /message/weekly` | `{"this_week": {13칸}, "last_week": {13칸}, "top_reasons": [{"code": "night", "count": 3}, ...]}` | `{"headline", "summary", "tip", "model": "claude-haiku-5-5", "cached": false}`. 키 없음·하루 상한 503, 요약이 이상함·거절·API 오류 502 |
 
 - `raw` 칸은 `ai/risk/schema.py`의 원시 값 13개. 빠진 칸은 모름(null)
 - 다른 칸, 문자열, true/false, NaN이면 422. 오류 응답에는 받은 값을 넣지 않고 칸 이름과 오류 종류만
@@ -63,24 +64,48 @@ C-2 위험도 모델(`ipp/model/risk_model.json`)을 API로 제공한다. 그누
 - 예측 서버는 정해진 칸 밖을 받지 않고(422), 요청을 저장하거나 로그에 남기지 않는다 (uvicorn access log 끔, log_level warning)
 - 127.0.0.1에서만 받는다
 
-## 서비스 붙이는 방법 (5단계 LLM 문구 등)
+## 주간 리포트 요약 (5, 선택, `message_api.py`)
 
-1. `serve/message_api.py`에 `make_router(...)`를 만들어 `(APIRouter(prefix='/message'), 상태 함수)`를 돌려준다
-2. 요청 본문은 `common.StrictBody`를 상속한다 (정해진 칸만, 숫자는 `common.Num`)
+통계 화면의 'AI 요약 보기' 버튼 → 서버 PHP `ipp/api/report.php`가 주간 집계(`ipp/lib/report.lib.php`) → 이 서버 `POST /message/weekly` → Claude API.
+
+- 모델 `claude-haiku-5-5`, effort `low`, 응답 형식은 JSON 스키마(`headline` 40자, `summary` 220자, `tip` 100자 이내). thinking은 모델 기본값(켜짐)
+- **입력**: 이번 주·지난주 13칸씩(결제 화면 수, 팝업 결정별 수, 담아두기 결과, 절약 금액 1,000원 단위, 위험 단계별 수, 심야 수, 쇼핑몰 **수**, 차단 수)과 위험도 이유 코드 횟수 상위 5개.
+  정해진 칸 밖, 음수, 문자열, 모르는 이유 코드는 422. LLM에는 코드 대신 이유의 뜻(예: '심야(밤 11시~새벽 4시) 결제 시도')을 보낸다
+- **파생 값** (`derived`, 서버 PHP `ipp_report_derived`가 미리 계산): 지난주 대비 차이 6개(결제 화면, 심야, 차단, 그래도 구매, 안 살래요, 절약 금액), 배수 3개(소수 한 자리, 지난주 0이면 null),
+  참은 비율·담아두기 성공 비율(정수 %, 두 주). 이 서버가 두 주 숫자로 다시 계산해 맞지 않으면 422 (반올림 차이만 허용: 배수 0.05, 비율 1%p).
+  프롬프트에 '보낸 숫자만 쓰고 직접 계산하지 말 것'을 적고, 파생 값을 '미리 계산한 값'으로 함께 보낸다
+- **응답 검사** (실패하면 502, 캐시하지 않음): `stop_reason`이 `end_turn`이 아님(거절, 잘림), JSON 아님, 칸이 다름, 빈 칸, 길이 초과, `<`·`>` 포함,
+  **보낸 글에 없는 숫자** (입력 값, 파생 값, 두 주 차이, 이유 설명의 숫자, 7·24만 허용. 소수는 한 덩어리로 반올림 없이 비교: 보낸 1.7배는 통과, 직접 계산한 1.67배·보내지 않은 비율 %는 버림. '세 번'처럼 글자로 쓴 수는 잡지 못함)
+- **키**: 이 프로세스의 `ANTHROPIC_API_KEY`(또는 `ANTHROPIC_AUTH_TOKEN`). `ant auth login` 프로필을 쓰려면 `IPP_AI_LLM_PROFILE=1`.
+  키가 없으면 `/health`의 `message`가 null이고 요청은 503. 키가 틀리면(401·403) 서버를 다시 켤 때까지 부르지 않는다
+- **비용·호출 수**: 하루 `IPP_AI_LLM_DAILY_LIMIT`번(기본 50, 캐시 적중은 세지 않음). 같은 입력은 7일 동안 메모리 캐시(키는 입력 숫자의 해시, 회원 아이디 없음). 재시도 1번, 한 번에 `IPP_AI_LLM_TIMEOUT`초(기본 12)
+- 모델은 `IPP_AI_LLM_MODEL`로 바꿀 수 있다
+- 요청·응답은 파일이나 로그에 남기지 않는다. 캐시는 서버를 끄면 사라진다
+
+## 서비스 붙이는 방법
+
+1. `serve/<이름>_api.py`에 `make_router(...)`를 만들어 `(APIRouter(prefix='/<이름>'), 상태 함수)`를 돌려준다 (`message_api.py` 참고)
+2. 요청 본문은 `common.StrictBody`를 상속한다 (정해진 칸만, 숫자는 `common.Num` 또는 범위가 있는 `int`)
 3. `app.py`의 `services`에 한 줄 더한다. `/health`에 자동으로 나온다
-4. PHP 쪽은 `ipp_risk_predict_remote`처럼 시간 제한, 응답 확인, 실패하면 지금 방식(고정 문구), 60초 건너뛰기를 둔다
+4. PHP 쪽은 `ipp_risk_predict_remote`, `ipp_report_summary`처럼 시간 제한, 응답 확인, 실패하면 지금 방식, 60초 건너뛰기를 둔다
 
 ## 테스트
 
 ```powershell
-# ai 폴더에서 (서버를 켜지 않아도 됨)
-.venv\Scripts\python.exe -m unittest serve.test_serve risk.test_risk
+# ai 폴더에서 (서버를 켜지 않아도 됨. 실제 Claude API는 부르지 않음)
+.venv\Scripts\python.exe -m unittest serve.test_serve serve.test_message risk.test_risk
 
 # 저장소 루트에서 (서버를 켜 둔 상태): PHP 계산과 서버 결과 비교, 자동 전환, 입력 거부
 php ipp/tests/risk_server_test.php
 ```
 
-- `serve.test_serve` 11개: 모델 JSON 예시 32개가 `model.py`와 같음, 빠진 칸 = 모름, 다른 칸·문자열·true·NaN 거부, 오류에 입력을 되돌려 주지 않음, 로컬 전용, 모델 파일 바뀌면 다시 읽기, 모델 없음/깨짐 503
+- `serve.test_serve` 10개: 모델 JSON 예시 32개가 `model.py`와 같음, 빠진 칸 = 모름, 다른 칸·문자열·true·NaN 거부, 오류에 입력을 되돌려 주지 않음, 로컬 전용, 모델 파일 바뀌면 다시 읽기, 모델 없음/깨짐 503
 - `risk_server_test.php`: 예시 32 + 가상 데이터 2,000 + 무작위 1,000개(모름·경계·범위 밖)의 확률 차이 1e-9 미만, 이유 순서 같음, 기여 차이 1e-4 이하.
   `ipp_risk_result`의 단계·문구·이유 문장이 PHP와 같음, 버전 다름 → PHP, 60초 건너뛰기와 다시 연결, 다른 칸·문자열 422
+- `serve.test_message` 14개 (가짜 클라이언트): 요청 모양(모델, effort low, 보내는 칸), 숫자와 이유 뜻·미리 계산한 값만 보냄, 다른 칸·모르는 코드·음수·문자열 422,
+  캐시, 하루 상한, 키 없음 503, 응답 검사 10가지, 허용 숫자, **파생 값(증감·배수·비율)을 쓴 정상 응답**, 직접 계산한 배수·비율은 502, 파생 값이 두 주와 다르면 422,
+  연결 오류 502·키 틀림 503 뒤 다시 부르지 않음, 실패는 캐시하지 않음
+- `ipp/tests/report_test.php` (MariaDB 필요, 실제 API 안 부름): 이유 횟수, 칸 정리, 금액 반올림, 응답 확인, 꺼짐·기록 없음·다른 주소·닫힌 포트 → null, 60초 건너뛰기,
+  파생 값(차이, 배수, null, 비율), 임시 기록으로 두 주 집계·파생 값 확인 후 삭제,
+  예측 서버가 켜져 있고 키가 없으면 503 → null, PHP 파생 값 무작위 200쌍을 서버가 받아들임(422 아님), 틀린 파생 값 422 (`php ipp/tests/report_test.php [서버 주소]`)
 - 서버 없이 되는 자동 전환 테스트(응답 확인, 주소 제한, 닫힌 포트 시간 제한, 60초 건너뛰기, 보내는 칸)는 `ipp/tests/risk_test.php`에 있다

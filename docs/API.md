@@ -503,6 +503,21 @@ client.decide(r.data['bl_id'], 'buy')                    # 그래도 구매할�
 | `regen_token` | 없음 | `{"ok": true, "token": "3f9a...(64자리)", "server": "http://localhost:8001"}` (`IPP_USE_CLIENT_API` 필요) |
 | `revoke_token` | 없음 | `{"ok": true}` |
 
+### `/ipp/api/report.php` (`IPP_USE_STATS` + `IPP_USE_LLM`, 5 LLM 주간 리포트 요약)
+
+통계 화면의 'AI 요약 보기' 버튼이 부릅니다. 요청 칸은 없습니다 (`POST`, 로그인 쿠키).
+
+| 경우 | 응답 |
+|---|---|
+| 요약을 받음 | `{"ok": true, "summary": {"headline": "...", "summary": "...", "tip": "..."}, "msg": ""}` |
+| 최근 2주 결제 화면·차단 기록이 없음 | `{"ok": true, "summary": null, "msg": "최근 2주 동안 쇼핑 기록이 없어요."}` (예측 서버를 부르지 않음) |
+| 예측 서버 꺼짐, API 키 없음, 하루 상한, 시간 초과(`IPP_LLM_TIMEOUT` 10초), 요약 검사 실패 | `{"ok": true, "summary": null, "msg": "지금은 요약을 만들 수 없어요."}` |
+| `IPP_USE_LLM`이 false (기본값) | `{"ok": false, "msg": "AI 요약 기능이 꺼져 있습니다."}` (통계 화면에 버튼도 없음) |
+
+- 서버 PHP가 회원의 이번 주(오늘 포함 최근 7일)·지난주(그 전 7일) 숫자를 집계해 예측 서버 `POST /message/weekly`로 보냅니다 (`ipp/lib/report.lib.php`). 보내는 칸: 결제 화면 수, 팝업 결정별 수, 담아두기 결과, 예상 절약 금액(1,000원 단위), 위험 단계별 수, 심야 결제 화면 수, **쇼핑몰 수(이름 없음)**, 차단 횟수, 이번 주 위험도 이유 코드 횟수 상위 5개, 그리고 미리 계산한 파생 값(지난주 대비 차이·배수, 참은 비율·담아두기 성공 비율). LLM은 숫자를 직접 계산하지 않고 보낸 값만 씁니다. 회원 아이디, 상품명, 주소, 시각은 보내지 않습니다
+- 예측 서버가 Claude API(`claude-haiku-5-5`)로 요약을 만들고, 입력에 없는 숫자나 너무 긴 문장이면 버립니다. 요약은 DB에 저장하지 않습니다 (예측 서버 메모리 캐시 7일)
+- 연결 실패·시간 초과·503 뒤 60초(`IPP_LLM_SKIP_SEC`)는 예측 서버를 부르지 않습니다
+
 ### `/ipp/api/mock_bank.php` (`IPP_USE_BANK`)
 
 은행 연동 mock입니다. 실제 은행 API로 바꿀 때는 `ipp/lib/bank.lib.php`의 함수만 교체합니다.
