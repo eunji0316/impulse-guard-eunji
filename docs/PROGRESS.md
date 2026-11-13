@@ -1,12 +1,51 @@
 # impulse-guard 진행 상황
 
-## 다음 단계: 7 마무리
+## 다음 단계: 7 마무리 (진행 중, feature/finish)
 
-**5 LLM 주간 리포트 요약 완료 (실제 Claude API 확인은 나중에).** 2026-11-13 dev와 main에 병합했다. `IPP_USE_LLM` 기본값 false라 지금 동작은 바뀌지 않는다.
-켜는 방법은 README 'AI 주간 리포트 요약 켜기', API 키를 만든 뒤 확인 순서는 아래 5 절.
+시연 준비, 문서, 정리는 아래 7 절. 남은 일은 **사용자 실행 확인**(실행 스크립트, 통계 칸)과 **팀 저장소 실제 비교**(위치를 받으면 읽기만).
+알려진 한계는 `docs/LIMITATIONS.md`에 모았다 (각 단계 절의 남은 이슈 체크박스는 기록으로 그대로 둔다).
 
-다음은 **7 마무리**다. 6 UI(모바일 웹, PC 대시보드)는 따로 하지 않고 7에서 시연에 필요한 것만 같이 다룬다.
-남은 이슈는 아래 각 단계 절(5, C-3, C-2, C-1)에 있다.
+## 2026-11-13 · 7: 마무리 (feature/finish)
+
+### 결정 사항 (사용자 승인)
+
+- 통계 화면에 '최근 7일 결제 화면 팝업' 칸 추가
+- 시연 모드는 환경변수로만 켜고(`extend/ipp.extend.php`의 기본값은 그대로), 데모 회원은 넣고 지우는 스크립트로
+- 로컬·원격 feature 브랜치 정리, detect.log는 백업 후 비우기
+- 팀 저장소는 읽기만 해서 실제 코드와 비교 (수정 금지)
+- AI 요약 시연은 미정: DEMO.md에 선택 단계로, 키가 없을 때 화면도 적음
+- 6 UI는 따로 하지 않고 시연에 필요한 통계 칸만
+
+### 1. 정리
+
+- 로컬 feature 브랜치 11개 삭제 (모두 main에 병합된 것, `git branch -d`). 원격 feature 브랜치 6개 삭제 (auto-detect, block-all-sites, desktop-modules, desktop-popup, desktop-server, risk-model). 원격에는 dev, main만
+- `desktop/logs/detect.log` (518KB)를 `desktop/logs/detect-backup-20261113.log`로 백업(내용 같은지 비교) 후 비움. 두 파일 모두 Git 제외
+- 확인: `data/ipp_*_down.txt` 없음, DB에 테스트 회원·`ipptest_*` 기록 없음 (admin 기록만)
+
+### 2. 시연 준비
+
+- `scripts/start.ps1`, `stop.ps1` (PowerShell 5.1, UTF-8 BOM): 웹(8001)·예측(8002)·데스크톱을 새 창으로 켜고 PID를 `data/ipp_pids.json`에. 포트가 이미 쓰이면 켜지 않음. 상태 표(웹 응답, 예측 서버 모델·AI 요약 키). `stop.ps1`은 스크립트가 켠 프로세스만 끔.
+  옵션 `-Demo`(웹 서버에 `IPP_RISK_SERVER=on`, 데스크톱에 `IPP_DESKTOP_CONFIG=desktop/local_config.demo.json`), `-Llm`(`IPP_USE_LLM=1`, `-Demo`와 함께, 키가 없으면 미리 알림), `-NoAi`, `-NoDesktop`, `-DryRun`
+- 시연 모드 환경변수: `IPP_RISK_SERVER`, `IPP_USE_LLM` 상수가 `getenv()`를 본다. 환경변수가 없으면 지금과 같은 `off`/`false` (CLI로 두 경우 확인).
+  데스크톱 `load_config`는 경로를 주지 않았을 때 `IPP_DESKTOP_CONFIG`를 먼저 본다 (테스트 1개 추가)
+- `scripts/demo_seed.php add | remove | status` (CLI만, 웹으로 열면 404): 데모 회원 `demo`/`demo1234`, 최근 14일 결제 화면 13건(이번 주 6, 지난주 7)·차단 5건·담아두기 3건, 토큰 발급과 `desktop/local_config.demo.json`(Git 제외, 지금 설정의 자동 감지 설정을 이어받음).
+  remove는 데모 회원의 모든 ipp 기록·포인트·회원 행과 설정 파일을 지움. 넣기 → 집계 확인(이번 주 참은 비율 80%, 지난주 43%) → 지우기 → 0건 확인
+- 통계 화면 '최근 7일 결제 화면 팝업': 결제 화면 감지, 버튼별(그래도 구매, 안 살래요, 담아두기, 닫음·고르지 않음), 위험 단계별, 심야, 쇼핑몰 수. 집계는 `ipp_report_week` (5와 같음). 기록이 없으면 안내 한 줄
+
+### 3. 문서
+
+- `docs/DEMO.md` 시연 시나리오 (준비, 7단계, AI 요약 선택 단계와 키 없을 때 화면, 문제 대처, 정리)
+- `docs/AI.md` 발표용 AI 파이프라인 (OCR → 화면 분류 → 위험도 → 예측 서버 → LLM 요약, 숫자, 한계)
+- `docs/PRIVACY.md` 개인정보 처리 원칙 (단계별 보는 것·남기는 것·보내는 곳, Git 제외, 지우는 방법)
+- `docs/LIMITATIONS.md` 남은 이슈를 한계로 모음 (해결됐지만 열린 채 남은 항목 포함: 인식 속도는 B-5에서 약 1.5~5초로 해결)
+- `docs/INTEGRATION.md` 팀 통합 (SQL 006~011 모두 다시 실행 안전, 설정값, 의존성, 바뀐 API, 겹치는 부분). 분리 기준 `71bb0a2`. 그누보드 기본 파일과 `desktop/original/`은 분리 이후 바뀌지 않음을 diff로 확인
+- README '빠른 시작'(실행 스크립트), 문서 목록. 예측 서버·AI 요약을 켜는 방법을 환경변수 기준으로 고침
+
+### 남은 일
+
+- [ ] 사용자 실행 확인: `start.ps1`(평소, `-Demo`), `stop.ps1`, 통계 화면 칸 (8001 서버는 Claude가 켜지 않음)
+- [ ] 팀 저장소 실제 코드와 비교 (`docs/INTEGRATION.md` 5번)
+- [ ] (선택) AI 요약 실제 API 확인
 
 ## 2026-11-13 · 5: LLM 주간 리포트 요약 (feature/llm-report, 완료 · main 병합, 실제 API 확인 전)
 
