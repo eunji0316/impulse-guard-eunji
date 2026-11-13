@@ -3,6 +3,8 @@ fastapi==0.162.0
 uvicorn==0.54.0
 # C-3 예측 서버 테스트(TestClient)
 httpx==0.28.1
+# 5 LLM 주간 리포트 요약 (ai/serve/message_api.py)
+anthropic==2.8.0
 scikit-learn==1.9.1
 pandas==3.1.0
 numpy==2.5.4

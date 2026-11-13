@@ -74,6 +74,16 @@ define('IPP_RISK_SERVER_TIMEOUT',   0.3);   // 초. check가 이보다 더 늦�
 define('IPP_RISK_SERVER_SKIP_SEC',  60);
 define('IPP_RISK_SERVER_DOWN_FILE', G5_DATA_PATH.'/ipp_risk_server_down.txt');   // 마지막 실패 시각 (data/는 Git 제외)
 
+/* ===== LLM 주간 리포트 요약 (5, 선택, ai/serve/message_api.py, ipp/lib/report.lib.php) ===== */
+// true면 통계 화면에 'AI 요약 보기' 버튼이 생긴다. 누르면 이번 주·지난주 집계 숫자를 예측 서버로 보내 Claude API 요약을 받는다
+// 보내는 값: 숫자와 위험도 이유 코드만 (회원 아이디, 쇼핑몰 이름, 상품명 없음). 요약은 저장하지 않는다
+// API 키는 예측 서버의 환경변수(ANTHROPIC_API_KEY)에만 둔다. 꺼져 있거나 실패하면 통계 화면은 지금 그대로
+define('IPP_USE_LLM',        false);
+define('IPP_LLM_SERVER_URL', 'http://127.0.0.1:8002');   // 예측 서버. 127.0.0.1, localhost, [::1]만 허용
+define('IPP_LLM_TIMEOUT',    10);    // 초. 버튼을 누른 뒤 최대로 기다리는 시간
+define('IPP_LLM_SKIP_SEC',   60);    // 예측 서버가 없거나 키가 없으면 이 시간 동안 다시 부르지 않음
+define('IPP_LLM_DOWN_FILE',  G5_DATA_PATH.'/ipp_llm_server_down.txt');
+
 /* ===== 테이블 이름 ===== */
 $g5['ipp_account_table']     = G5_TABLE_PREFIX.'ipp_account';
 $g5['ipp_transaction_table'] = G5_TABLE_PREFIX.'ipp_transaction';

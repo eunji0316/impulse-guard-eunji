@@ -1,12 +1,67 @@
 # impulse-guard 진행 상황
 
-## 다음 단계: 5 LLM 메시지 (선택)
+## 다음 단계: 7 마무리
 
-**C-3 예측 서버(축소판) 완료.** 2026-11-13 사용자 확인과 실제 서버 확인 뒤 dev에 병합하고 main에도 병합했다. main이 C-3 완료 버전이다.
-`IPP_RISK_SERVER` 기본값은 `off`, 시연 때 켜는 방법은 README '예측 서버 켜기'.
+**5 LLM 주간 리포트 요약 완료 (실제 Claude API 확인은 나중에).** 2026-11-13 dev와 main에 병합했다. `IPP_USE_LLM` 기본값 false라 지금 동작은 바뀌지 않는다.
+켜는 방법은 README 'AI 주간 리포트 요약 켜기', API 키를 만든 뒤 확인 순서는 아래 5 절.
 
-다음은 **5 LLM 맞춤 메시지 (선택, docs/FEATURES.md 2. AI 기능)**: 팝업 문구, 주간 리포트 요약.
-같은 예측 서버에 서비스로 붙인다 (`ai/serve/README.md` '서비스 붙이는 방법'). 실패하면 지금 고정 문구를 쓴다.
+다음은 **7 마무리**다. 6 UI(모바일 웹, PC 대시보드)는 따로 하지 않고 7에서 시연에 필요한 것만 같이 다룬다.
+남은 이슈는 아래 각 단계 절(5, C-3, C-2, C-1)에 있다.
+
+## 2026-11-13 · 5: LLM 주간 리포트 요약 (feature/llm-report, 완료 · main 병합, 실제 API 확인 전)
+
+통계 화면에서 이번 주와 지난주 기록을 Claude API가 짧게 요약한다. 지금은 없던 기능이라 꺼져 있거나 실패하면 통계 화면이 지금 그대로다.
+
+### 결정 사항 (사용자 승인)
+
+- 후보 두 가지 중 **주간 리포트 요약만** 한다. 팝업 문구는 새 정보 없이 말만 바뀌고, 문구가 결정을 바꿔 C-2 라벨을 흔들기 때문에 하지 않는다
+- 모델 `claude-haiku-5-5`
+- 쇼핑몰은 **개수만** 보낸다. 회원 아이디, 상품명, 주소, 시각도 보내지 않는다
+- API 키가 없어 가짜 클라이언트 테스트까지만 하고, 실제 호출 확인은 나중에
+- `IPP_USE_LLM` 기본값 false, 켜는 방법은 README
+
+### 바뀐 것
+
+- 예측 서버 `ai/serve/message_api.py`: `POST /message/weekly`. 입력은 `StrictBody`(두 주 13칸씩 0 이상 정수 + 이유 코드 횟수 상위 5개, 코드는 정해진 14개만).
+  Claude API 호출(effort low, JSON 스키마 응답, max_tokens 2000, 시간 제한 12초, 재시도 1번) 뒤 응답 검사: `stop_reason`이 end_turn이 아니면(거절, 잘림) 버림, 칸·길이(40/220/100자)·태그,
+  **보낸 글에 없는 숫자**(입력 값, 두 주 차이, 이유 설명의 숫자, 7·24만 허용). 실패는 502, 키 없음·하루 상한(50번)은 503, 키가 틀리면 서버를 다시 켤 때까지 부르지 않음.
+  같은 입력은 7일 메모리 캐시(키는 입력 해시). 요청·응답은 저장하거나 로그에 남기지 않는다. `/health`에 `message` 상태(키 없으면 null)
+- `config.py`: `IPP_AI_LLM_MODEL`, `IPP_AI_LLM_TIMEOUT`, `IPP_AI_LLM_DAILY_LIMIT`, `IPP_AI_LLM_PROFILE`(ant auth login 프로필). 키는 예측 서버 프로세스의 `ANTHROPIC_API_KEY`에만
+- 서버 PHP `ipp/lib/report.lib.php`: 두 주 집계(`ipp_report_input`), 이유 횟수, 금액 1,000원 단위 반올림, 기록 없음이면 부르지 않음, 예측 서버 호출(시간 제한 10초, 응답 확인, 연결 실패·시간 초과·503 뒤 60초 건너뜀)
+- `ipp/api/report.php`(로그인 세션, POST), `ipp/stats.php`: `IPP_USE_LLM`이 true일 때만 'AI 요약 보기' 칸. **버튼을 눌렀을 때만** 부른다 (`php -S`가 요청을 하나씩 처리해서 요약을 기다리는 동안 데스크톱 check도 기다리므로)
+- 설정 `extend/ipp.extend.php`: `IPP_USE_LLM` false, `IPP_LLM_SERVER_URL`, `IPP_LLM_TIMEOUT` 10, `IPP_LLM_SKIP_SEC` 60, `IPP_LLM_DOWN_FILE`
+- `ai/requirements.txt`에 `anthropic==2.8.0` (ai/.venv에 설치함)
+- **보완 (사용자 요청): 파생 값을 PHP에서 미리 계산** (`ipp_report_derived`): 지난주 대비 차이 6개, 배수 3개(소수 한 자리, 지난주 0이면 null), 참은 비율·담아두기 성공 비율(정수 %, 두 주).
+  프롬프트에 '보낸 숫자만 쓰고 직접 계산하지 말 것', 파생 값은 '미리 계산한 값'으로 함께 보냄. 예측 서버는 두 주 숫자로 다시 계산해 다르면 422 (반올림 차이만 허용).
+  응답 검사는 그대로이고, 소수(1.7배)를 한 덩어리로 반올림 없이 비교하도록만 바꿨다 (전에는 1과 7로 나눠 읽어 보낸 배수도 거부됨. 반올림해 비교하면 직접 계산한 1.67배가 통과해서 반올림하지 않음)
+- 문서: README 'AI 주간 리포트 요약 켜기', `docs/API.md` `/ipp/api/report.php`, `ai/serve/README.md`, `docs/FEATURES.md`
+- C-3 기록 바로잡음: `serve.test_serve`는 11개가 아니라 10개
+
+### 테스트
+
+- ai: `serve.test_message` 14개(가짜 클라이언트, 파생 값을 쓴 정상 응답·직접 계산한 값 거부·파생 값 불일치 422 포함) + `serve.test_serve` 10개 + `risk.test_risk` 8개 = 32개 통과. 실제 Claude API는 부르지 않았다
+- PHP `ipp/tests/report_test.php` 35개 통과 (파생 값 7개 포함. DB 집계는 테스트 전용 아이디 `ipptest_report`로 임시 기록을 넣고 확인한 뒤 지움, 남은 기록 0).
+  새 코드 예측 서버를 키 없이 8012에 띄워 `php ipp/tests/report_test.php http://127.0.0.1:8012` → 39개 통과 (키 없음 503 → null, 실패 시각 기록, PHP 파생 값 무작위 200쌍을 서버가 모두 받아들임, 틀린 파생 값 422)
+- PHP `risk_test.php` 134개, 데스크톱 unittest 313개 그대로 통과
+- 테스트 중 그누보드를 CLI로 불러올 때 방문자 기록이 남을 수 있어(`visit_insert.inc.php`) `G5_IS_CLI`를 정의한다. 확인 결과 기록은 남지 않았다
+
+### 실제 확인 순서 (사용자, API 키를 만든 뒤)
+
+| 순서 | 할 일 | 기대 결과 |
+|---|---|---|
+| 1 | README대로 키를 넣고 예측 서버 켜기 | 콘솔 `주간 리포트 요약: claude-haiku-5-5, 하루 50번` |
+| 2 | `http://127.0.0.1:8002/health` | `"message": {"model": "claude-haiku-5-5", "credentials": "api_key", "calls_today": 0, ...}` |
+| 3 | `IPP_USE_LLM` true, 8001 서버, 로그인 → 통계 화면 → AI 요약 보기 | 제목, 요약(3문장 이내), 💡 제안. 숫자가 위 통계 칸과 맞는지 |
+| 4 | 같은 버튼 한 번 더 | 바로 나옴 (캐시), `/health`의 `calls_today` 그대로 |
+| 5 | 예측 서버를 끄고 버튼 | '지금은 요약을 만들 수 없어요.', 통계 칸은 그대로 |
+| 6 | 키 없이 예측 서버를 켜고 버튼 | 같은 문구, `data/ipp_llm_server_down.txt` 생김 |
+| 7 | 끝나면 `IPP_USE_LLM`을 false로 | 버튼 없음 |
+
+### 남은 이슈
+
+- [ ] 실제 Claude API로 요약 품질 확인 (숫자 검사에 너무 자주 걸리는지, 문장 길이, 말투). 2~3번 호출, 1번에 약 1원
+- [ ] 숫자 검사는 '세 번'처럼 글자로 쓴 수를 잡지 못한다
+- [ ] 회원의 기록 집계가 외부 API로 나가므로, 켜기 전에 사용자에게 알리는 문구(통계 칸 아래 안내만 있음)를 설정 화면에도 둘지
 
 ## 2026-11-13 · C-3: 예측 서버 축소판 (feature/predict-server, 완료 · main 병합)
 
@@ -38,7 +93,7 @@ C-2 위험도 모델을 FastAPI로 제공한다. 모델이 로지스틱 회귀�
 
 ### 테스트
 
-- ai: `serve.test_serve` 11개 + `risk.test_risk` 8개 통과
+- ai: `serve.test_serve` 10개 + `risk.test_risk` 8개 통과 (처음에 11개로 잘못 적음, 5단계에서 바로잡음)
 - PHP `risk_test.php` 107 → 134개 (응답 거부 8가지, 주소 제한 9가지, 닫힌 포트 0.3초 안 실패·실패 시각 기록·60초 건너뛰기, 보내는 칸)
 - `ipp/tests/risk_server_test.php` (예측 서버를 켠 상태) 11개 통과: 예시 32 + 가상 데이터 2,000 + 무작위 1,000개 확률 차이 최대 2.2e-16, 이유 순서 모두 같음.
   서버 호출 중앙값 약 3ms, p99 약 25ms (`check` 0.04초 안에 들어감)

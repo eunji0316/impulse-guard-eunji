@@ -157,6 +157,31 @@ API 명세는 [docs/API.md](docs/API.md)를 참고하세요.
   예측 서버를 다시 켜면 60초 뒤부터 다시 씁니다
 - 예측 서버에는 위험도 계산에 필요한 숫자 13개만 보냅니다. 회원 아이디, 상품명, 쇼핑몰은 보내지 않습니다
 
+## AI 주간 리포트 요약 켜기 (선택)
+
+통계 화면(`/ipp/stats.php`)에 **AI 요약 보기** 버튼을 띄워, 이번 주와 지난주 기록을 Claude API가 짧게 요약하게 합니다. 기본은 꺼져 있고, 꺼져 있으면 통계 화면은 지금 그대로입니다.
+
+1. [Claude Console](https://console.anthropic.com)에서 API 키를 만듭니다. 사용 한도(Limits)도 걸어 두는 것을 권합니다
+2. 예측 서버를 켤 때 키를 환경변수로 넣습니다. 키는 이 터미널에만 두고 파일이나 Git에는 적지 않습니다
+
+   ```powershell
+   cd ai
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt   # 최초 1회 (anthropic 포함)
+   $env:ANTHROPIC_API_KEY = "sk-ant-..."                          # 이 터미널에서만
+   .\.venv\Scripts\python.exe -m serve                              # '주간 리포트 요약: claude-haiku-5-5, 하루 50번'이 보이면 정상
+   ```
+
+   `ant auth login`으로 로그인해 두었다면 키 대신 `$env:IPP_AI_LLM_PROFILE = "1"`을 넣습니다
+3. `extend/ipp.extend.php`에서 `define('IPP_USE_LLM', false);`를 `true`로 바꿉니다
+4. 확인
+   - 브라우저에서 `http://127.0.0.1:8002/health` → `"message": {"model": "claude-haiku-5-5", ...}` (키가 없으면 `null`)
+   - 로그인 → 통계 화면 → **AI 요약 보기** → 제목, 요약, 제안 한 줄이 보입니다. 기록이 없으면 '최근 2주 동안 쇼핑 기록이 없어요.'
+5. 끄려면 `IPP_USE_LLM`을 `false`로 돌려놓습니다
+
+- 보내는 값은 집계 숫자와 위험도 이유 코드뿐입니다. 회원 아이디, 상품명, 주소, 쇼핑몰 이름은 보내지 않고(쇼핑몰은 개수만), 요약은 저장하지 않습니다
+- 요약 한 번에 1원 안팎(Haiku 5.5)이고, 예측 서버가 하루 50번까지만 부릅니다(`IPP_AI_LLM_DAILY_LIMIT`). 같은 기록이면 7일 동안 다시 부르지 않습니다
+- `php -S`는 요청을 하나씩 처리해서, 요약을 기다리는 몇 초 동안(최대 10초) 데스크톱의 감지 요청도 기다립니다. 그래서 버튼을 눌렀을 때만 부릅니다. 쇼핑 감지를 시연하는 중에는 누르지 않는 것이 좋습니다
+
 ## 작업 규칙
 
 ### 폴더
