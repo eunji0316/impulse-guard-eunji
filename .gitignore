@@ -9,6 +9,8 @@ __pycache__/
 
 # 데스크톱 프로그램의 서버 주소와 토큰 (예시: desktop/local_config.example.json)
 desktop/local_config.json
+# 시연용 데모 회원 설정 (scripts/demo_seed.php가 만든다, 토큰 포함)
+desktop/local_config.demo.json
 
 # 데스크톱 감지 로그와 C-1 학습용 OCR 원문 (개인정보가 있을 수 있음)
 desktop/logs/

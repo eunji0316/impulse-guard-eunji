@@ -12,6 +12,9 @@ $saved_7d       = ipp_stats_saved_7d($mb_id);
 $avg_sec       = ipp_stats_avg_block_sec($mb_id);
 $daily         = ipp_stats_daily_7d($mb_id);
 $by_site       = ipp_stats_by_site($mb_id);
+// 최근 7일 결제 화면 팝업 (데스크톱이 결제 화면에서 띄운 팝업과 고른 버튼, 위험 단계). 5 AI 요약과 같은 집계
+$popup_7d      = ipp_report_week($mb_id, ipp_stats_since(7), G5_TIME_YMDHIS);
+$popup_none    = max(0, $popup_7d['checkouts'] - $popup_7d['buy'] - $popup_7d['giveup'] - $popup_7d['hold']);   // 창을 닫았거나 아직 고르지 않음
 
 $g5['title'] = '통계';
 include_once(G5_PATH.'/head.php');
@@ -51,6 +54,32 @@ include_once(G5_PATH.'/head.php');
         <div style="color:#888;font-size:11px;">차단 화면에서 머문 시간</div>
     </div>
 </div>
+
+<h3>최근 7일 결제 화면 팝업</h3>
+<?php if ($popup_7d['checkouts'] > 0) { ?>
+<table style="width:100%;border-collapse:collapse;margin-bottom:8px;" border="1" cellpadding="6">
+    <tr><th>결제 화면 감지</th><th>그래도 구매</th><th>안 살래요</th><th>담아두기(24시간)</th><th>닫음·고르지 않음</th></tr>
+    <tr style="text-align:center;">
+        <td><?php echo number_format($popup_7d['checkouts']); ?>회</td>
+        <td><?php echo number_format($popup_7d['buy']); ?>회</td>
+        <td><?php echo number_format($popup_7d['giveup']); ?>회</td>
+        <td><?php echo number_format($popup_7d['hold']); ?>회</td>
+        <td><?php echo number_format($popup_none); ?>회</td>
+    </tr>
+</table>
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px;" border="1" cellpadding="6">
+    <tr><th>위험 높음</th><th>위험 보통</th><th>위험 낮음</th><th>심야(23~4시)</th><th>쇼핑몰 수</th></tr>
+    <tr style="text-align:center;">
+        <td style="color:#c62828;"><?php echo number_format($popup_7d['risk_high']); ?>회</td>
+        <td style="color:#b45309;"><?php echo number_format($popup_7d['risk_mid']); ?>회</td>
+        <td style="color:#2448c4;"><?php echo number_format($popup_7d['risk_low']); ?>회</td>
+        <td><?php echo number_format($popup_7d['night']); ?>회</td>
+        <td><?php echo number_format($popup_7d['malls']); ?>곳</td>
+    </tr>
+</table>
+<?php } else { ?>
+<p style="color:#888;margin-bottom:20px;">최근 7일 동안 결제 화면 팝업이 없습니다.</p>
+<?php } ?>
 
 <?php if (defined('IPP_USE_LLM') && IPP_USE_LLM) { // 5 LLM 주간 리포트 요약: 버튼을 눌렀을 때만 부른다 (php -S가 요청을 하나씩 처리해 기다리는 동안 다른 요청도 멈추므로) ?>
 <div id="ipp-ai-report" style="border:1px solid #c7d2fe;background:#f5f7ff;border-radius:8px;padding:14px;margin-bottom:20px;">
