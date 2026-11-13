@@ -65,6 +65,15 @@ define('IPP_RISK_LEVEL_MID',  0.3);    // 이 이상이면 보통 (이유 문장
 define('IPP_RISK_LEVEL_HIGH', 0.55);   // 이 이상이면 높음
 define('IPP_RISK_REASON_MAX', 3);      // 응답에 담는 이유 수 (기록에는 모두)
 
+/* ===== 예측 서버 (C-3, ai/serve, ipp/lib/risk.lib.php) ===== */
+// 'on'이면 위험도 확률과 이유를 예측 서버(FastAPI)에서 받는다. 'off'면 지금처럼 PHP가 계산한다
+// 예측 서버가 꺼져 있거나 실패하면 자동으로 PHP 계산을 쓰고, IPP_RISK_SERVER_SKIP_SEC 동안 다시 부르지 않는다
+define('IPP_RISK_SERVER',           'off');
+define('IPP_RISK_SERVER_URL',       'http://127.0.0.1:8002');   // 127.0.0.1, localhost, [::1]만 허용
+define('IPP_RISK_SERVER_TIMEOUT',   0.3);   // 초. check가 이보다 더 늦어지지 않는다
+define('IPP_RISK_SERVER_SKIP_SEC',  60);
+define('IPP_RISK_SERVER_DOWN_FILE', G5_DATA_PATH.'/ipp_risk_server_down.txt');   // 마지막 실패 시각 (data/는 Git 제외)
+
 /* ===== 테이블 이름 ===== */
 $g5['ipp_account_table']     = G5_TABLE_PREFIX.'ipp_account';
 $g5['ipp_transaction_table'] = G5_TABLE_PREFIX.'ipp_transaction';

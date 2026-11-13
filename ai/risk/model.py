@@ -84,6 +84,7 @@ class RiskModel:
         for spec, c in zip(self.features, contrib):
             if spec['group']:
                 groups[spec['group']] = groups.get(spec['group'], 0.0) + c
-        reasons = sorted(((g, round(c, 4)) for g, c in groups.items() if c >= self.reason_min),
-                         key=lambda t: -t[1])
+        # 정렬은 반올림 전 값으로 (서버 PHP와 같게. 반올림 뒤 정렬하면 기여가 거의 같은 두 이유의 순서가 PHP와 달라질 수 있다)
+        reasons = [(g, round(c, 4)) for g, c in sorted(((g, c) for g, c in groups.items() if c >= self.reason_min),
+                                                       key=lambda t: -t[1])]
         return prob, reasons, logit

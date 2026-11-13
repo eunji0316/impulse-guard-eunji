@@ -1,18 +1,85 @@
 # impulse-guard 진행 상황
 
-## 다음 단계: C-3 예측 서버
+## 다음 단계: 5 LLM 메시지 (선택)
 
-**C-2 완료.** 2026-11-13 사용자가 실제 결제 화면에서 확인(문제 없음)한 뒤 dev를 main에 병합했다. main이 C-2(충동구매 위험도 모델) 완료 버전이다.
+**C-3 예측 서버(축소판) 완료.** 2026-11-13 사용자 확인과 실제 서버 확인 뒤 dev에 병합하고 main에도 병합했다. main이 C-3 완료 버전이다.
+`IPP_RISK_SERVER` 기본값은 `off`, 시연 때 켜는 방법은 README '예측 서버 켜기'.
 
-C-2 요약 (자세한 내용은 아래 C-2 절)
-- 결제 화면 팝업 1건 = 1행, 라벨은 팝업 결정. 가상 데이터 6,000건으로 로지스틱 회귀 (`ai/risk/`), AUC 0.710 (지금 규칙 0.590)
-- 서버 `check`가 PHP로 위험도·단계(낮음/보통/높음)·이유를 계산 (`ipp/lib/risk.lib.php`, `ipp/model/risk_model.json`). 금액을 나중에 채우면 다시 계산하고 처음 값도 기록
-- 데스크톱: 상품 화면 숫자 특성(할인율, 압박 문구, 반복 방문, 머문 시간)을 결제 화면 `check`에 숫자로만, 팝업은 단계별 배지·제목 색, 이유는 보통 이상만, 쇼핑몰 이름만 표시
-- 가격 입력 정리: 혜택/적립 금액 제외, 할인가 옆 할인율. 포인트는 위험도와 연결하지 않음
-- 테스트: 데스크톱 unittest 313개, PHP 107개, ai 8개. DB: `ipp/sql/010`, `011`
+다음은 **5 LLM 맞춤 메시지 (선택, docs/FEATURES.md 2. AI 기능)**: 팝업 문구, 주간 리포트 요약.
+같은 예측 서버에 서비스로 붙인다 (`ai/serve/README.md` '서비스 붙이는 방법'). 실패하면 지금 고정 문구를 쓴다.
 
-다음은 **C-3 예측 서버**다 (docs/FEATURES.md 2. AI 기능). C-2 결정대로 서버 PHP 계산(`ipp/lib/risk.lib.php`)과 같은 JSON 모델(`ipp/model/risk_model.json`)을 쓰고,
-결과가 같은지는 JSON의 `tests` 예시로 확인한다. 남은 이슈는 아래 C-2, C-1 절에 있다.
+## 2026-11-13 · C-3: 예측 서버 축소판 (feature/predict-server, 완료 · main 병합)
+
+C-2 위험도 모델을 FastAPI로 제공한다. 모델이 로지스틱 회귀라 PHP로도 같은 값을 내므로, 예측 서버는 꺼져 있어도 되는 부품으로 둔다.
+
+### 결정 사항 (사용자 승인)
+
+- 범위 축소: 예측 서버는 **확률과 이유 코드만** 계산한다. 단계(0.3/0.55)·문구·이유 문장·DB 조회·기록은 서버 PHP 그대로
+- 모드는 `off` / `on` 두 가지 (shadow 모드 없음). 기본 `off`
+- 결과 확인은 Python 테스트와 PHP·서버 비교 스크립트로
+- 자동 전환: 예측 서버 → PHP 계산 → 규칙 이유만. 실패하면 60초 건너뜀. 개인정보는 원시 값 숫자 13개만, 127.0.0.1만 허용
+- 5단계 LLM 메시지를 같은 서버에 붙일 수 있는 구조
+
+### 바뀐 것
+
+- `ai/serve/` (자세한 내용은 `ai/serve/README.md`)
+  - `app.py`: 서비스별 (라우터, 상태 함수)를 붙이는 구조. 지금은 `risk`뿐, 5단계는 `message_api.py` 한 줄 추가
+  - `risk_api.py`: `POST /risk/predict` (계산은 `ai/risk/model.py` 그대로), 모델 파일 수정 시각·크기가 바뀌면 다시 읽음, 없거나 형식이 틀리면 503
+  - `common.py`: 요청 본문은 정해진 칸만(`extra=forbid`), 숫자는 문자열·true·NaN 거부, 422 오류에 받은 값을 넣지 않음, 127.0.0.1(::1) 외 403
+  - `__main__.py`: `python -m serve` → 127.0.0.1:8002, access log 끔
+- `ipp/lib/risk.lib.php`: `ipp_risk_predict_remote`(curl, 시간 제한 0.3초, 응답 확인, 실패 시각 파일, 60초 건너뛰기), `ipp_risk_result`가 `on`이면 먼저 예측 서버, 실패하면 `ipp_risk_predict`.
+  응답 확인: HTTP 200, 확률 0~1 숫자, 이유 코드가 모델 group, **모델 버전이 PHP JSON과 같음**. 주소는 127.0.0.1/localhost/[::1]만. 보내는 값은 `raw_fields` 13개를 `ipp_risk_num`으로 정리한 숫자와 null
+- 응답 칸 `risk_source` (`server`/`php`, 위험도 없으면 `""`) — `check`, `amount` 모두. 데스크톱은 이 칸을 쓰지 않아 수정 없음. DB 변경 없음
+- 설정 (`extend/ipp.extend.php`): `IPP_RISK_SERVER` `'off'`, `IPP_RISK_SERVER_URL`, `IPP_RISK_SERVER_TIMEOUT` 0.3, `IPP_RISK_SERVER_SKIP_SEC` 60, `IPP_RISK_SERVER_DOWN_FILE` (`data/`)
+- **`ai/risk/model.py` 고침**: 이유를 반올림한 기여로 정렬해, 기여가 소수 4자리에서 같아지는 두 이유의 순서가 PHP와 달랐다 (비교 스크립트 무작위 1,000개 중 1개, `frequency`와 `views`).
+  반올림 전 값으로 정렬하도록 고쳤다. 확률은 그대로이고 모델 JSON 예시 32개의 결과도 그대로다
+- `ai/requirements.txt`에 `httpx` (TestClient). ai/.venv에 fastapi·uvicorn이 설치되어 있지 않아 requirements 버전으로 설치함
+- 문서: `docs/API.md` (`risk_source`, 예측 서버 문단), `ai/serve/README.md`, `ai/risk/README.md`, `docs/FEATURES.md`
+
+### 테스트
+
+- ai: `serve.test_serve` 11개 + `risk.test_risk` 8개 통과
+- PHP `risk_test.php` 107 → 134개 (응답 거부 8가지, 주소 제한 9가지, 닫힌 포트 0.3초 안 실패·실패 시각 기록·60초 건너뛰기, 보내는 칸)
+- `ipp/tests/risk_server_test.php` (예측 서버를 켠 상태) 11개 통과: 예시 32 + 가상 데이터 2,000 + 무작위 1,000개 확률 차이 최대 2.2e-16, 이유 순서 모두 같음.
+  서버 호출 중앙값 약 3ms, p99 약 25ms (`check` 0.04초 안에 들어감)
+- 데스크톱 unittest 313개 그대로 통과
+- 로컬 서버(8001) 확인은 아래 '실제 확인 결과'
+
+### 실제 확인 순서 (사용자)
+
+준비: 8001 서버, `ai` 폴더에서 `.venv\Scripts\python.exe -m serve` (예측 서버), `extend/ipp.extend.php`의 `IPP_RISK_SERVER`를 `'on'`
+
+| 순서 | 할 일 | 기대 결과 |
+|---|---|---|
+| 1 | 브라우저에서 `http://127.0.0.1:8002/health` | `{"services":{"risk":{"model":"20261113-synthetic",...}}}` |
+| 2 | 저장소 루트에서 `php ipp/tests/risk_server_test.php` | `통과 11개, 실패 0개` |
+| 3 | 데스크톱 실행 → 결제 화면 | 팝업이 C-2와 같음 (배지, 이유) |
+| 4 | HeidiSQL 또는 로그 | 위험도·단계가 C-2와 같은 방식으로 기록 (`bl_risk_model` 그대로). 응답 `risk_source`는 `server` |
+| 5 | 예측 서버를 Ctrl+C로 끄고 바로 다른 결제 화면 | 팝업 정상, 감지→팝업 시간이 0.3초 이상 늘지 않음. `data/ipp_risk_server_down.txt` 생김 |
+| 6 | 60초 안에 결제 화면 한 번 더 | 기다림 없이 PHP 계산 (`risk_source: php`) |
+| 7 | 예측 서버를 다시 켜고 60초 뒤 결제 화면 | 다시 `server`, `ipp_risk_server_down.txt` 지워짐 |
+| 8 | 끝나면 `IPP_RISK_SERVER`를 `'off'`로 되돌릴지 결정 | |
+
+- `risk_source`는 데스크톱 로그에 남지 않는다. 확인하려면 `php ipp/tests/risk_server_test.php`나 `ipp_risk_server_down.txt` 생김/지워짐으로 본다
+
+### 실제 확인 결과 (2026-11-13)
+
+- 사용자: 1·3·5번 정상. 7번은 확인하지 못함. 10:17 시점 설정이 `off`였어서 3·5번이 `on` 상태였는지는 알 수 없다
+- 실제 서버 직접 확인 (10:20, 8001 + 예측 서버, `IPP_RISK_SERVER` `on`): 데스크톱 `Client`로 결제 화면 `check`를 `log` 없이 보냄 (DB 기록 없음, `bl_id` 없음)
+
+  | 상황 | risk_source | 위험도 | 응답 시간 | 실패 시각 파일 |
+  |---|---|---|---|---|
+  | 예측 서버 켜짐 | server | 0.2744 낮음 | 58ms | 없음 |
+  | 실패 시각을 지금으로 적음 (60초 안) | php | 0.2744 | 17ms | 있음 |
+  | 실패 시각을 61초 전으로 적음 | server | 0.2744 | 20ms | 지워짐 |
+
+  세 응답의 위험도·이유가 같다. 실제로 연결이 끊긴 경우(닫힌 포트 → PHP, 실패 시각 기록, 0.3초 안)는 `risk_test.php`에서 확인했다
+- 확인 뒤 `IPP_RISK_SERVER`를 기본값 `off`로 되돌림
+
+### 남은 이슈
+
+- [ ] 데스크톱 로그에 `risk_source`를 남길지 (지금은 서버 응답에만)
+- [ ] 예측 서버를 프로그램 시작과 함께 켜는 방법 (지금은 따로 켬)
 
 ## 2026-11-13 · C-2: 충동구매 위험도 모델 (feature/risk-model, 완료 · main 병합)
 

@@ -1,6 +1,8 @@
 # Python 3.13에서 설치를 확인한 버전 (2026-10-28)
 fastapi==0.162.0
 uvicorn==0.54.0
+# C-3 예측 서버 테스트(TestClient)
+httpx==0.28.1
 scikit-learn==1.9.1
 pandas==3.1.0
 numpy==2.5.4
