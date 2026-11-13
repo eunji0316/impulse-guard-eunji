@@ -252,9 +252,104 @@ function ipp_risk_assess($mb_id, $price, $req) {
     }
 }
 
+/*
+ * C-3 예측 서버 (ai/serve, FastAPI)
+ * - IPP_RISK_SERVER가 'on'이면 확률과 이유를 예측 서버에서 받는다. 단계, 문구, 이유 문장, 기록은 지금처럼 PHP가 한다
+ * - 실패하면(연결 실패, 시간 초과, 이상한 응답, 모델 버전이 이 서버의 JSON과 다름) PHP가 직접 계산한다 (ipp_risk_predict)
+ * - 한 번 실패하면 IPP_RISK_SERVER_SKIP_SEC 동안 예측 서버를 부르지 않는다 (꺼져 있을 때 check마다 기다리지 않게).
+ *   php -S는 요청끼리 메모리를 나누지 않아서 실패 시각을 파일(IPP_RISK_SERVER_DOWN_FILE)에 적는다
+ * - 보내는 값은 모델 JSON의 원시 값(raw_fields) 숫자와 null뿐이다. 회원 아이디, 기록 번호, 쇼핑몰, 상품명은 보내지 않는다
+ * - 주소는 127.0.0.1, localhost, [::1]만 허용한다 (다른 주소면 부르지 않고 PHP 계산)
+ */
+function ipp_risk_server_on() {
+    return defined('IPP_RISK_SERVER') && IPP_RISK_SERVER === 'on';
+}
+
+function ipp_risk_server_local_url($url) {
+    $u = @parse_url((string)$url);
+    if (!$u || !isset($u['scheme'], $u['host']) || strtolower($u['scheme']) !== 'http') return false;
+    if (isset($u['user']) || isset($u['pass'])) return false;
+    return in_array(strtolower($u['host']), array('127.0.0.1', 'localhost', '[::1]'), true);
+}
+
+// 예측 서버에 보낼 원시 값: 모델이 쓰는 칸만, 숫자 또는 null (PHP 계산과 같은 ipp_risk_num 기준)
+function ipp_risk_server_body($model, $raw) {
+    $out = array();
+    foreach ($model['raw_fields'] as $k) {
+        $out[$k] = ipp_risk_num(isset($raw[$k]) ? $raw[$k] : null);
+    }
+    return array('raw' => (object)$out);
+}
+
+// 예측 서버 응답 확인. 맞으면 ipp_risk_predict와 같은 모양, 아니면 null
+function ipp_risk_server_parse($model, $code, $text) {
+    if ($code !== 200 || !is_string($text)) return null;
+    $d = json_decode($text, true);
+    if (!is_array($d) || !isset($d['prob'], $d['model']) || !array_key_exists('reasons', $d)) return null;
+    if ((string)$d['model'] !== (string)$model['version']) return null;   // 다른 모델로 계산한 값은 쓰지 않는다
+    $prob = $d['prob'];
+    if (!(is_float($prob) || is_int($prob)) || !is_finite((float)$prob) || $prob < 0 || $prob > 1) return null;
+    $groups = array();
+    foreach ($model['features'] as $spec) {
+        if (!empty($spec['group'])) $groups[$spec['group']] = true;
+    }
+    if (!is_array($d['reasons'])) return null;
+    $reasons = array();
+    foreach ($d['reasons'] as $r) {
+        if (!is_array($r) || count($r) !== 2 || !is_string($r[0]) || !isset($groups[$r[0]])) return null;
+        if (!(is_float($r[1]) || is_int($r[1])) || !is_finite((float)$r[1])) return null;
+        $reasons[] = array($r[0], (float)$r[1]);
+    }
+    return array('prob' => (float)$prob, 'reasons' => $reasons, 'logit' => null);
+}
+
+// 예측 서버로 확률과 이유. 쓸 수 없으면 null (호출한 쪽이 PHP로 계산)
+// $opts: url, timeout(초), skip_sec, down_file (테스트용. 기본은 extend/ipp.extend.php 상수)
+function ipp_risk_predict_remote($model, $raw, $opts = array()) {
+    $o = array_merge(array(
+        'url'       => defined('IPP_RISK_SERVER_URL') ? IPP_RISK_SERVER_URL : '',
+        'timeout'   => defined('IPP_RISK_SERVER_TIMEOUT') ? IPP_RISK_SERVER_TIMEOUT : 0.3,
+        'skip_sec'  => defined('IPP_RISK_SERVER_SKIP_SEC') ? IPP_RISK_SERVER_SKIP_SEC : 60,
+        'down_file' => defined('IPP_RISK_SERVER_DOWN_FILE') ? IPP_RISK_SERVER_DOWN_FILE : ''
+    ), $opts);
+    if (!ipp_risk_server_local_url($o['url']) || !function_exists('curl_init')) return null;
+
+    $down = (string)$o['down_file'];
+    if ($down !== '' && is_file($down)) {
+        $at = (int)@file_get_contents($down);
+        if (time() - $at < (int)$o['skip_sec']) return null;   // 최근에 실패: 부르지 않음
+    }
+
+    $ms = max(50, (int)round($o['timeout'] * 1000));
+    $ch = curl_init(rtrim($o['url'], '/').'/risk/predict');
+    curl_setopt_array($ch, array(
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode(ipp_risk_server_body($model, $raw)),
+        CURLOPT_HTTPHEADER     => array('Content-Type: application/json'),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT_MS => $ms,
+        CURLOPT_TIMEOUT_MS     => $ms,
+        CURLOPT_NOSIGNAL       => true,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_NOPROXY        => '*'
+    ));
+    $text = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $pred = ($text === false) ? null : ipp_risk_server_parse($model, $code, $text);
+
+    if ($down !== '') {
+        if ($pred === null) @file_put_contents($down, (string)time());
+        elseif (is_file($down)) @unlink($down);
+    }
+    return $pred;
+}
+
 // 원시 값 → 위험도 결과 (ipp_risk_assess, ipp_risk_reassess 공용)
+// source: 확률·이유를 계산한 곳 'server'(예측 서버) / 'php'
 function ipp_risk_result($model, $raw) {
-    $pred    = ipp_risk_predict($model, $raw);
+    $pred   = ipp_risk_server_on() ? ipp_risk_predict_remote($model, $raw) : null;
+    $source = $pred ? 'server' : 'php';
+    if (!$pred) $pred = ipp_risk_predict($model, $raw);
     $level   = ipp_risk_level($pred['prob']);
     $reasons = array();
     foreach (array_slice($pred['reasons'], 0, IPP_RISK_REASON_MAX) as $r) {
@@ -268,6 +363,7 @@ function ipp_risk_result($model, $raw) {
         'codes'        => array_map(function ($r) { return $r[0]; }, $pred['reasons']),   // 기록용: 개수 제한 없이 모두
         'show_reasons' => $level !== 'low',
         'model'        => (string)$model['version'],
+        'source'       => $source,
         'raw'          => $raw
     );
 }
@@ -335,6 +431,7 @@ function ipp_risk_response($assess) {
         'risk_message'      => $assess ? $assess['message'] : '',
         'risk_reasons'      => $assess ? $assess['reasons'] : array(),
         'risk_show_reasons' => $assess ? $assess['show_reasons'] : false,
-        'risk_model'        => $assess ? $assess['model'] : ''
+        'risk_model'        => $assess ? $assess['model'] : '',
+        'risk_source'       => $assess ? $assess['source'] : ''   // C-3: server(예측 서버) / php
     );
 }

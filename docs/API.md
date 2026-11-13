@@ -254,9 +254,11 @@ Authorization: Bearer 3f9a...(64자리)
   | `risk_reasons` | 위험을 올린 이유 `[{code, text}]` 큰 순서, 최대 3개 (`IPP_RISK_REASON_MAX`). **낮음이어도 채웁니다** (분석용) |
   | `risk_show_reasons` | 팝업에 이유 문장을 보일지. **보통 이상만 `true`**. 낮음은 이유 없이 `risk_message`만 보입니다 |
   | `risk_model` | 모델 버전 (예: `20261113-synthetic`) |
+  | `risk_source` | C-3: 확률과 이유를 계산한 곳. `server`(예측 서버) / `php`(서버 PHP 직접 계산). 위험도가 없으면 `""` |
 
   - 이유 `code`: `night`(심야), `evening`(늦은 저녁), `weekend`, `payday`(월급일 직후), `amount`(큰 금액), `amount_ratio`(평소 대비 금액), `discount`, `pressure`(서두르게 하는 문구), `views`(최근 상품 화면 수), `same_item`(같은 상품 반복), `browse`(짧게 보고 결제), `frequency`(최근 7일 결제 화면 수), `history`(지난 '그래도 구매' 비율), `cooldown`(담아두기 실패). 문구는 `ipp_risk_reason_text()`
   - 서버가 DB에서 만드는 값 (이번 기록 저장 전, 그 시점 이전 기록만): 이전 90일 결제 화면 금액 평균 대비 비율(3건 미만이면 1.0), 최근 7일 결제 화면 수, 180일 동안의 팝업 결정 중 '그래도 구매' 비율과 담아두기 실패 비율(기록이 적으면 평균 쪽으로 당김)
+  - **예측 서버 (C-3)**: `IPP_RISK_SERVER`가 `on`이면 확률과 이유를 예측 서버(`ai/serve`, `127.0.0.1:8002`의 `POST /risk/predict`)에서 받고, 단계·문구·이유 문장·기록은 지금처럼 PHP가 합니다. 예측 서버가 꺼져 있거나 0.3초 안에 답하지 않거나 응답이 이상하거나 모델 버전이 다르면 PHP가 직접 계산하고(`risk_source: "php"`), 그 뒤 60초 동안은 예측 서버를 부르지 않습니다. 어느 쪽이든 칸과 값은 같습니다 (`ipp/tests/risk_server_test.php`). 예측 서버에는 원시 값 13개(숫자와 null)만 보냅니다
   - **포인트와 상관없습니다.** `point`, `point2`는 위험도와 관계없이 금액으로만 정합니다 (위험도를 일부러 올려 포인트를 받는 악용 방지)
   - `log: true`면 감지 기록에 `bl_risk`, `bl_risk_level`, `bl_risk_model`, `bl_risk_reasons`(이유 코드 모두), `bl_risk_raw`(예측에 쓴 원시 값, 숫자와 null만)를 저장합니다 (`ipp/sql/010_block_log_risk.sql`). 나중에 팝업 결정과 짝지어 실제 데이터로 다시 평가·학습합니다 (`ai/risk/README.md`)
   - 실제 응답 (HTTP 테스트, 과거 '그래도 구매'가 많은 임시 회원, 평소 3만 원대인데 15만 원 결제 화면. 위험도 칸만)
@@ -516,7 +518,7 @@ client.decide(r.data['bl_id'], 'buy')                    # 그래도 구매할�
 - **팀원 프로그램은 `client.php` + API 토큰으로 연결합니다.** 회원마다 웹에서 토큰을 발급받아 프로그램에 입력합니다.
 - 팀원 프로그램을 새 `client` 값으로 구분하려면 `extend/ipp.extend.php`의 `IPP_CLIENTS`에 추가합니다 (예: `mobile`). 기록의 `bl_client`, 쿨다운의 `cd_client`는 VARCHAR(10)입니다.
 - 앞으로 바뀔 부분 (FEATURES.md 3번)
-  - 위험도 (C-2 완료): 결제 화면 `check`가 `risk`, `risk_level`, `risk_message`, `risk_reasons`, `risk_show_reasons`, `risk_model`을 돌려줍니다. 서버 PHP 계산(`ipp/lib/risk.lib.php`). C-3 예측 서버는 같은 JSON 모델을 씁니다
+  - 위험도 (C-2 완료): 결제 화면 `check`가 `risk`, `risk_level`, `risk_message`, `risk_reasons`, `risk_show_reasons`, `risk_model`을 돌려줍니다. 서버 PHP 계산(`ipp/lib/risk.lib.php`). C-3 예측 서버(`ai/serve`)는 같은 JSON 모델을 쓰고, 켜면 확률·이유를 대신 계산합니다 (`risk_source`)
   - 사이트 토글(`sites[].on`): "차단 사이트 목록"에서 "쇼핑몰 감지 예외 목록"으로 의미가 바뀝니다.
   - 통계: 감지 출처(`bl_client`)별로 나눠 보기
 - 바꿀 때는 기존 칸의 이름과 뜻은 유지하고 새 칸을 추가하는 방식으로 합니다. 칸을 없애거나 뜻을 바꿔야 하면 이 문서에 먼저 적고 팀원과 맞춥니다.
