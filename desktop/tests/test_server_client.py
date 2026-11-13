@@ -72,6 +72,23 @@ class TestConfig(unittest.TestCase):
             os.unlink(f.name)
         self.assertEqual((conf['server'], conf['token'], conf['timeout_sec']), ('http://example.test:8001', 'abc', 1.5))
 
+    def test_env_config_path(self):
+        """시연 모드: IPP_DESKTOP_CONFIG가 있으면 그 파일, 경로를 직접 주면 그 경로가 먼저"""
+        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False, encoding='utf-8') as f:
+            json.dump({'server': 'http://demo.test:8001', 'token': 'demo'}, f)
+        old = os.environ.get('IPP_DESKTOP_CONFIG')
+        os.environ['IPP_DESKTOP_CONFIG'] = f.name
+        try:
+            self.assertEqual(server_client.load_config()['token'], 'demo')
+            here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.assertEqual(server_client.load_config(os.path.join(here, 'local_config.example.json'))['token'], '')
+        finally:
+            if old is None:
+                os.environ.pop('IPP_DESKTOP_CONFIG', None)
+            else:
+                os.environ['IPP_DESKTOP_CONFIG'] = old
+            os.unlink(f.name)
+
     def test_example_file(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         conf = server_client.load_config(os.path.join(here, 'local_config.example.json'))

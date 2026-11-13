@@ -22,11 +22,11 @@ C-2 위험도 모델(`ipp/model/risk_model.json`)을 API로 제공한다. 그누
 .venv\Scripts\python.exe -m serve        # http://127.0.0.1:8002, Ctrl+C로 끔
 ```
 
-그누보드가 이 서버를 쓰게 하려면 `extend/ipp.extend.php`에서 `IPP_RISK_SERVER`를 `'on'`으로 바꾼다.
+그누보드가 이 서버를 쓰게 하려면 웹 서버를 환경변수 `IPP_RISK_SERVER=on`으로 켠다 (`scripts/start.ps1 -Demo`가 해 줌). `extend/ipp.extend.php`는 바꾸지 않는다.
 
 | 설정 (extend/ipp.extend.php) | 기본값 | 뜻 |
 |---|---|---|
-| `IPP_RISK_SERVER` | `'off'` | `'on'`이면 예측 서버에 묻는다 |
+| `IPP_RISK_SERVER` | `'off'` (환경변수 `IPP_RISK_SERVER=on`이면 `'on'`) | `'on'`이면 예측 서버에 묻는다 |
 | `IPP_RISK_SERVER_URL` | `http://127.0.0.1:8002` | 127.0.0.1, localhost, [::1]만 허용. 다른 주소면 부르지 않는다 |
 | `IPP_RISK_SERVER_TIMEOUT` | 0.3 | 초. 이 시간 안에 답이 없으면 PHP 계산 |
 | `IPP_RISK_SERVER_SKIP_SEC` | 60 | 한 번 실패하면 이 시간 동안 예측 서버를 부르지 않는다 |
