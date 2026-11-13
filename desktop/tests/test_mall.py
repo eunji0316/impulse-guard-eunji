@@ -61,7 +61,9 @@ class TestIdentify(unittest.TestCase):
 
     def test_fuzzy_needs_long_name(self):
         """짧은 도메인 이름은 비슷해도 알려진 쇼핑몰로 보지 않는다 (모르는 쇼핑몰 도메인)"""
-        self.assertEqual(mall.identify('', [box('abc.com/order', 100, 10)]).name, 'abc.com')
+        m = mall.identify('', [box('abc.com/order', 100, 10)])
+        self.assertEqual((m.name, m.code), ('쇼핑몰', ''))
+        self.assertIn('abc.com', m.basis)
 
     def test_page_site_hint(self):
         m = mall.identify('', [box('상품', 0, 0)], 'coupang')
@@ -77,8 +79,8 @@ class TestIdentify(unittest.TestCase):
     def test_unknown_mall_domain(self):
         m = mall.identify('shop.example.co.kr/order/123 - Chrome')
         self.assertEqual((m.name, m.code, m.basis), ('example.co.kr', '', '모르는 쇼핑몰, 창 제목 도메인'))
-        m = mall.identify('주문서', [box('https://www.mystore.com/checkout', 150, 10)])
-        self.assertEqual((m.name, m.basis), ('mystore.com', '모르는 쇼핑몰, 주소창 도메인'))
+        m = mall.identify('주문서', [box('https://www.mystore.com/checkout', 150, 10)])     # OCR 도메인은 로그에만
+        self.assertEqual((m.name, m.basis), ('쇼핑몰', '모르는 쇼핑몰, 주소창 OCR 도메인 mystore.com (팝업에는 안 보임)'))
 
     def test_nothing_known(self):
         """상품명만 있으면 상품명을 쓰지 않고 '쇼핑몰'"""

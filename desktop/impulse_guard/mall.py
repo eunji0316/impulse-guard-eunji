@@ -6,8 +6,8 @@
 2. 창 제목에 알려진 쇼핑몰 이름                                   예: '주문/결제 : 네이버페이 - Chrome'
 3. 주소창(화면 맨 위 줄) OCR 글자의 도메인이 알려진 쇼핑몰 (OCR 오인식 0/o, 1/l, i/l, 빠진 마침표를 감안)
 4. 화면 글자의 쇼핑몰 이름/로고 (page.find_site, config.SITE_HINTS)
-5. 모르는 쇼핑몰이지만 도메인을 찾았으면 그 도메인               예: 'example.co.kr'
-6. 그래도 모르면 '쇼핑몰'
+5. 모르는 쇼핑몰이지만 창 제목에 도메인이 있으면 그 도메인     예: 'example.co.kr'
+6. 그래도 모르면 '쇼핑몰'. 주소창 OCR로 읽은 모르는 도메인은 글자가 틀릴 수 있어 팝업에 보이지 않고 로그(근거)에만 남긴다
 창 제목 원문은 여기서 쓰고 버린다. 로그에는 근거(찾은 도메인 또는 쇼핑몰 이름 단어)만 남긴다.
 """
 import difflib
@@ -133,6 +133,9 @@ def identify(title='', boxes=None, page_site=''):
     bar_domains = domains_in(bar, ocr=True)
     if page_site in config.MALLS:
         return Mall(config.MALLS[page_site][0], page_site, '화면 글자의 쇼핑몰 이름')
-    for d in title_domains + bar_domains:
-        return Mall(base_domain(d), '', f"모르는 쇼핑몰, {'창 제목' if d in title_domains else '주소창'} 도메인")
+    if title_domains:
+        return Mall(base_domain(title_domains[0]), '', '모르는 쇼핑몰, 창 제목 도메인')
+    if bar_domains:
+        # 주소창 OCR 도메인은 글자가 틀릴 수 있어 팝업에 보이지 않고 로그에만 남긴다 (C-2 사용자 결정)
+        return Mall(UNKNOWN_NAME, '', f'모르는 쇼핑몰, 주소창 OCR 도메인 {base_domain(bar_domains[0])} (팝업에는 안 보임)')
     return Mall(UNKNOWN_NAME, '', '근거 없음')
