@@ -31,6 +31,7 @@ from .detect_log import DetectLog, NullLog
 from .detector import classifier, page as page_info, price, shopping, stage as stage_mod
 from .popup_model import hms as _hms
 from .risk_features import ProductTracker, summary as features_summary
+from . import mall as mall_mod
 from .server_client import Client, auto_settings, load_config
 
 
@@ -43,6 +44,7 @@ class Analysis:
     stage: stage_mod.StageResult = None
     frame_hash: int = None       # 분석한 화면의 해시 (F4 캡처, 같은 주문 판단에 쓴다)
     title_key: object = None     # 캡처할 때 맨 앞 창 제목의 해시 (dedup.title_key). 제목 원문은 두지 않는다
+    mall: object = None          # 팝업에 보일 쇼핑몰 이름과 근거 (mall.Mall). 창 제목을 아는 곳에서 정한다
 
     @property
     def is_shopping(self):
@@ -84,6 +86,8 @@ class AmountWait:
     order: object                # dedup.SeenOrder (금액 모름)
     since: float                 # 미루기 시작한 시각 (App.clock)
     analysis: object             # 시간이 지나면 이 분석 결과로 '확인 중' 팝업을 띄운다
+    detected_at: object = None   # 이 결제 화면을 처음 감지한 시각 (timing.now 기준). 팝업 timing의 감지→팝업을 여기서부터 잰다
+    started: float = 0.0         # 미루기 시작한 시각 (timing.now 기준)
 
 
 @dataclass
@@ -211,6 +215,17 @@ def print_result(a):
         print("  - 쇼핑몰 특유의 구매 버튼이나 가격 정보가 충분히 발견되지 않았습니다.")
 
 
+def set_mall(a, title):
+    """쇼핑 화면이면 팝업에 보일 쇼핑몰 이름을 정한다 (창 제목, 주소창, 알려진 쇼핑몰 목록. 상품명은 쓰지 않음)"""
+    if a.is_shopping:
+        a.mall = mall_mod.identify(title or '', a.boxes, a.page.site if a.page else '')
+
+
+def mall_note(a):
+    m = getattr(a, 'mall', None)
+    return m.note() if m is not None else ''
+
+
 def check_params(a, item_name=None, features=None):
     """서버 check에 보낼 값. 결제 화면이면 결제 금액을 보내고 원가/할인율은 보내지 않는다 (상품 하나의 값이 아님)
     features: 결제 화면의 위험도 입력 (C-2, 상품 화면에서 센 숫자). 상품 화면이면 보내지 않는다"""
@@ -317,6 +332,7 @@ class App:
         with timing.measure('capture'):
             fr = capture.grab_for_detect()       # 자동 감지와 같이 맨 앞 창 영역 (F4를 누른 창)
         key = title_key(fr.foreground_title)
+        title, fr.foreground_title = fr.foreground_title, ''
         img, fr.img = fr.img, None
         with timing.measure('hash'):
             h = frame.dhash(img)
@@ -327,6 +343,7 @@ class App:
         del img                           # 캡처 이미지는 저장하지 않고 바로 버린다
         a.frame_hash = h
         a.title_key = key
+        set_mall(a, title)                # 창 제목 원문은 쇼핑몰 이름을 정하는 데만 쓰고 버린다
         return a
 
     def _prepare(self):
@@ -369,7 +386,7 @@ class App:
             elif not a.is_checkout:
                 self.orders.left()
             note = self._server_note(r) if r is not None else ''
-            note = ', '.join(x for x in (note, self._risk_log(r, features)) if x)
+            note = ', '.join(x for x in (note, self._risk_log(r, features), mall_note(a) if plan else '') if x)
             self.log.event('f4', a, action=plan[0] if plan else '', ocr_sec=ocr_sec, note=self._popup_note(plan, note))
             if plan:
                 site = a.page.site if a.page else ''
@@ -462,15 +479,31 @@ class App:
         if w is None or self.clock() - w.since < config.CHECKOUT_AMOUNT_WAIT_SEC or not self.try_begin():
             return False
         shown = False
+        t = self._wait_timing(w)
         try:
             self.waiting = None
-            shown = self._checkout_popup(w.analysis, w.order, None, '금액을 기다렸지만 못 읽어 확인 중으로 띄움')
+            with timing.active(t):
+                self._next_round()
+                shown = self._checkout_popup(w.analysis, w.order, None, '금액을 기다렸지만 못 읽어 확인 중으로 띄움')
         except Exception as e:
             print(f"!!! 자동 감지 분석 중 오류가 발생했습니다: {e}")
         finally:
             if not shown:
                 self._busy.release()
+                self._log_timing(t)
         return shown
+
+    @staticmethod
+    def _wait_timing(w, t=None):
+        """금액을 기다렸다 띄우는 팝업의 시간 측정: 기다린 시간(금액 기다림)과, 처음 감지한 때부터의 감지→팝업
+        t가 없으면(OCR 없이 화면이 그대로인 회차) 새로 만든다"""
+        if t is None:
+            t = timing.Timing('auto')
+            t.info['회차 종류'] = '화면 그대로 (OCR 없음)'
+        t.add('amount_wait', timing.now() - w.started)
+        if w.detected_at is not None:
+            t.detected_at = w.detected_at
+        return t
 
     def _next_round(self):
         self.round += 1
@@ -486,7 +519,8 @@ class App:
         try:
             self._prepare()
             a, ocr_sec = timed_analysis(self.analyze_frame, img)
-            a.title_key = title_key(title)          # 제목 원문은 여기서 해시로만 바꾸고 버린다
+            a.title_key = title_key(title)          # 제목 원문은 여기서 해시와 쇼핑몰 이름으로만 바꾸고 버린다
+            set_mall(a, title)
             shown = self.handle_auto(a, frame_hash, ocr_sec)
         except Exception as e:
             print(f"!!! 자동 감지 분석 중 오류가 발생했습니다: {e}")
@@ -552,7 +586,12 @@ class App:
         if not v.is_dup and not a.amount and self.orders.recent_known(site, exclude=v.order) is not None:
             # 같은 쇼핑몰의 최근 주문(금액 있음)에 다시 들어온 것일 수 있다 (주문서 주소가 새로 생겨 제목으로 구분 못 함).
             # 금액을 읽을 때까지 팝업을 미룬다. 못 읽으면 CHECKOUT_AMOUNT_WAIT_SEC 뒤 '확인 중' 팝업
-            self.waiting = AmountWait(v.order, self.clock(), a)
+            t = timing.current()
+            self.waiting = AmountWait(v.order, self.clock(), a,
+                                      detected_at=(t.detected_at if t.detected_at is not None else t.started_at) if t else None,
+                                      started=timing.now())
+            if t is not None:
+                t.info['팝업'] = f'금액 확인까지 미룸 (최대 {config.CHECKOUT_AMOUNT_WAIT_SEC}초)'
             self.log.event('auto', a, dup='wait', ocr_sec=ocr_sec,
                            note=f'금액 모름: 최근 주문과 같은 주문인지 금액을 읽을 때까지 팝업을 미룸 '
                                 f'(최대 {config.CHECKOUT_AMOUNT_WAIT_SEC}초)')
@@ -569,6 +608,10 @@ class App:
 
     def _handle_waiting(self, w, a, site, frame_hash, ocr_sec):
         """금액을 기다리던 결제 화면의 다음 분석"""
+        if a.amount or self.clock() - w.since >= config.CHECKOUT_AMOUNT_WAIT_SEC:
+            t = timing.current()
+            if t is not None:
+                self._wait_timing(w, t)
         if a.amount:
             self.waiting = None
             v = self.orders.resolve(w.order, site, a.amount, frame_hash, a.title_key)
@@ -604,11 +647,11 @@ class App:
             return False
         kind, view = plan
         if kind == 'impulse':
-            view.item_name = view.api_name = name or view.api_name
+            view.api_name = name or view.api_name     # 서버 기록(쿨다운 이름)에는 상품명, 팝업에는 쇼핑몰 이름(build)
             self._link_record(order, view.bl_id, a.amount)
             actions = popup_model.Actions(self.client, view,
                                           on_decided=lambda d: self.orders.decide(order, d, view.bl_id))
-            note = self._popup_note(plan, ', '.join(x for x in (self._server_note(r), extra, risk) if x))
+            note = self._popup_note(plan, ', '.join(x for x in (self._server_note(r), extra, risk, mall_note(a)) if x))
             self.log.event('auto', a, action='popup', ocr_sec=ocr_sec, note=note)
             self._post(lambda: self.show(kind, view, actions=actions, site=site, order=order))
         else:
@@ -679,7 +722,8 @@ class App:
         """결제 화면 check의 위험도 입력 (C-2). 상품 화면이면 None"""
         if not a.is_checkout:
             return None
-        return self.products.features(a.page.site if a.page else '')
+        with timing.measure('features'):
+            return self.products.features(a.page.site if a.page else '')
 
     @staticmethod
     def _risk_log(r, features):

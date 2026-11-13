@@ -10,9 +10,10 @@ tkinter 없이 동작하는 부분만 모았다. 화면(popup.py)은 이 결과�
 from dataclasses import dataclass, field
 
 from . import config
+from . import mall as mall_mod
 
 NO_PRICE_TEXT = '가격을 읽지 못했어요'
-NO_NAME_TEXT = '상품명을 읽지 못했어요'
+NO_NAME_TEXT = '상품명을 읽지 못했어요'      # (C-2부터 팝업에는 쓰지 않음. 쇼핑몰 이름을 보인다)
 NO_NAME_API = '상품명을 읽지 못한 상품'      # 쿨다운에는 상품명이 꼭 필요해서 대신 보내는 이름
 NO_PRICE_REASON = '가격을 읽지 못해 큰 금액인지 확인할 수 없어요. 한 번 더 생각해 볼까요?'
 # 결제 화면인데 결제 금액을 아직 못 읽었을 때 (B-5). 팝업이 떠 있는 동안 화면에서 총 결제금액을 읽으면 채운다 (fill_price)
@@ -33,7 +34,7 @@ TITLES = {
 
 @dataclass
 class ImpulseView:
-    item_name: str               # 화면에 보일 상품명 (못 읽었으면 NO_NAME_TEXT)
+    item_name: str               # 팝업 상품 칸에 보일 쇼핑몰 이름 (mall.py. 상품명은 보이지 않음)
     api_name: str                # 서버에 보낼 상품명
     price: int                   # 할인가 (0 = 못 읽음)
     price_text: str
@@ -104,6 +105,15 @@ def risk_note(data):
     return f"위험도 {float(data['risk']):.2f} {style[1].replace('위험 ', '')} ({codes or '이유 없음'}{shown})"
 
 
+def mall_name(analysis):
+    """팝업 상품 칸에 보일 쇼핑몰 이름 (mall.py). 분석에 쇼핑몰 정보가 없으면 화면 글자로만 정한다"""
+    m = getattr(analysis, 'mall', None)
+    if m is None:
+        info = analysis.page
+        m = mall_mod.identify('', analysis.boxes, info.site if info else '')
+    return m.name
+
+
 def build(analysis, result, block_remain=0):
     """('blocked', BlockedView) / ('impulse', ImpulseView) / None
 
@@ -114,7 +124,8 @@ def build(analysis, result, block_remain=0):
         return None
     d = result.data
     p, info = analysis.prices, analysis.page
-    name = (info.item_name if info else '') or ''
+    name = (info.item_name if info else '') or ''      # 서버 기록용 (쿨다운 이름). 팝업에는 쇼핑몰 이름만 보인다
+    shop = mall_name(analysis)
 
     if d.get('is_blocking'):
         return 'blocked', BlockedView(int(block_remain or 0), name)
@@ -145,7 +156,7 @@ def build(analysis, result, block_remain=0):
             reasons.append(CHECKOUT_PENDING_REASON)
 
     v = ImpulseView(
-        item_name=name or NO_NAME_TEXT, api_name=name or NO_NAME_API,
+        item_name=shop, api_name=name or NO_NAME_API,
         price=price, price_text=won(price) if price else (CHECKOUT_PENDING_TEXT if pending else NO_PRICE_TEXT),
         reasons=reasons[:max_reasons],
         point=int(d.get('point') or 0), point2=int(d.get('point2') or 0),
