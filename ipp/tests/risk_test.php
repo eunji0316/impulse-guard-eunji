@@ -86,5 +86,55 @@ check('금액 비율 문구', ipp_risk_reason_text('amount_ratio', $raw) === '�
 check('머문 시간 문구', ipp_risk_reason_text('browse', $raw) === '상품을 보고 2분 만에 결제하려고 해요.');
 check('할인 문구', strpos(ipp_risk_reason_text('discount', $raw), '40%') === 0);
 
+// 8. C-3 예측 서버 자동 전환 (서버 없이 되는 부분. 서버와 결과 비교는 risk_server_test.php)
+$t0  = $model['tests'][0];
+$res = ipp_risk_result($model, $t0['raw']);
+check('예측 서버 상수 없으면 꺼짐', !ipp_risk_server_on() && $res['source'] === 'php');
+check('응답에 risk_source', ipp_risk_response($res)['risk_source'] === 'php' && ipp_risk_response(null)['risk_source'] === '');
+
+$ok = json_encode(array('prob' => 0.42, 'reasons' => array(array('night', 0.3)), 'model' => $model['version']));
+check('정상 응답', ipp_risk_server_parse($model, 200, $ok)['prob'] === 0.42);
+$bad = array(
+    '모델 버전 다름'  => array(200, json_encode(array('prob' => 0.42, 'reasons' => array(), 'model' => 'other'))),
+    '확률 범위 밖'    => array(200, json_encode(array('prob' => 1.5, 'reasons' => array(), 'model' => $model['version']))),
+    '확률 문자열'     => array(200, json_encode(array('prob' => '0.4', 'reasons' => array(), 'model' => $model['version']))),
+    '모르는 이유 코드' => array(200, json_encode(array('prob' => 0.4, 'reasons' => array(array('<b>x</b>', 0.3)), 'model' => $model['version']))),
+    '이유 모양 틀림'  => array(200, json_encode(array('prob' => 0.4, 'reasons' => array('night'), 'model' => $model['version']))),
+    '이유 없음'       => array(200, json_encode(array('prob' => 0.4, 'model' => $model['version']))),
+    'JSON 아님'       => array(200, '<html>'),
+    '503'             => array(503, $ok),
+);
+foreach ($bad as $name => $b) check("응답 거부: {$name}", ipp_risk_server_parse($model, $b[0], $b[1]) === null);
+
+check('주소 127.0.0.1', ipp_risk_server_local_url('http://127.0.0.1:8002'));
+check('주소 localhost', ipp_risk_server_local_url('http://localhost:8002/'));
+foreach (array('http://example.com:8002', 'http://10.0.0.5:8002', 'https://127.0.0.1:8002', 'http://u:p@127.0.0.1:8002',
+               'http://127.0.0.1.example.com', '', 'file:///etc/passwd') as $u) {
+    check("다른 주소 거부 {$u}", !ipp_risk_server_local_url($u));
+}
+
+$down = sys_get_temp_dir().'/ipp_risk_server_down_test.txt';
+@unlink($down);
+$opts = array('url' => 'http://example.com', 'timeout' => 0.3, 'skip_sec' => 60, 'down_file' => $down);
+check('다른 주소는 부르지 않음', ipp_risk_predict_remote($model, $t0['raw'], $opts) === null && !is_file($down));
+
+$opts['url'] = 'http://127.0.0.1:9';   // 닫힌 포트
+$t = microtime(true);
+$r = ipp_risk_predict_remote($model, $t0['raw'], $opts);
+$sec = microtime(true) - $t;
+check('닫힌 포트면 null', $r === null);
+check('닫힌 포트도 시간 제한 안에', $sec < 0.6, round($sec, 3));
+check('실패 시각 기록', is_file($down) && abs((int)file_get_contents($down) - time()) <= 2);
+$t = microtime(true);
+ipp_risk_predict_remote($model, $t0['raw'], $opts);
+$sec = microtime(true) - $t;
+check('60초 안에는 부르지 않음', $sec < 0.05, round($sec, 3));
+@unlink($down);
+
+$body = ipp_risk_server_body($model, array_merge($t0['raw'], array('mb_id' => 'user1', 'item_name' => '상품', 'amount' => '89000')));
+$keys = array_keys((array)$body['raw']);
+check('보내는 칸은 원시 값만', $keys === $model['raw_fields'], implode(',', $keys));
+check('보내는 값은 숫자 또는 null', count(array_filter((array)$body['raw'], function ($v) { return $v !== null && !is_float($v); })) === 0);
+
 echo "통과 {$pass}개, 실패 {$fail}개\n";
 exit($fail ? 1 : 0);

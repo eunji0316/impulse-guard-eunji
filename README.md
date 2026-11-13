@@ -133,6 +133,30 @@ python -m venv .venv
 
 API 명세는 [docs/API.md](docs/API.md)를 참고하세요.
 
+## 예측 서버 켜기 (시연용, 선택)
+
+충동구매 위험도는 기본으로 그누보드 서버(PHP)가 계산합니다. 시연에서 "AI 예측 서버"를 보여 줄 때만 예측 서버(FastAPI)를 켭니다.
+켜지 않아도, 켰다가 꺼져도 팝업은 똑같이 뜹니다 (자세한 내용은 [ai/serve/README.md](ai/serve/README.md)).
+
+1. 예측 서버를 켭니다 (새 터미널, 끌 때는 `Ctrl + C`)
+
+   ```powershell
+   cd ai
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt   # 최초 1회
+   .\.venv\Scripts\python.exe -m serve                              # http://127.0.0.1:8002
+   ```
+
+2. `extend/ipp.extend.php`에서 `define('IPP_RISK_SERVER', 'off');`를 `'on'`으로 바꿉니다 (8001 서버는 다시 켜지 않아도 됩니다)
+3. 확인
+   - 브라우저에서 `http://127.0.0.1:8002/health` → 모델 버전이 보이면 정상. `http://127.0.0.1:8002/docs`는 API 화면 (발표용)
+   - 저장소 루트에서 `php ipp/tests/risk_server_test.php` → `실패 0개`면 PHP 계산과 결과가 같습니다
+   - 결제 화면 `check` 응답의 `risk_source`가 `server`면 예측 서버가 계산한 것, `php`면 서버 PHP가 계산한 것입니다
+4. 시연이 끝나면 `IPP_RISK_SERVER`를 다시 `'off'`로 돌려놓습니다
+
+- 예측 서버가 꺼져 있거나 0.3초 안에 답하지 않으면 자동으로 PHP가 계산하고, 그 뒤 60초 동안은 예측 서버를 부르지 않습니다 (`data/ipp_risk_server_down.txt`에 실패 시각).
+  예측 서버를 다시 켜면 60초 뒤부터 다시 씁니다
+- 예측 서버에는 위험도 계산에 필요한 숫자 13개만 보냅니다. 회원 아이디, 상품명, 쇼핑몰은 보내지 않습니다
+
 ## 작업 규칙
 
 ### 폴더
