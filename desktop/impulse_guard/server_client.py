@@ -54,7 +54,8 @@ def auto_settings(data=None):
 def load_config(path=None):
     """local_config.json 읽기. 파일이 없거나 깨졌으면 토큰 없는 기본값 (→ 오프라인 모드)
     auto: 자동 감지 설정 (auto_settings)"""
-    path = path or os.path.join(DESKTOP_DIR, config.LOCAL_CONFIG)
+    # 시연 모드: 환경변수 IPP_DESKTOP_CONFIG가 있으면 그 파일 (scripts/start.ps1 -Demo가 데모 회원 설정 파일을 넘김)
+    path = path or os.environ.get('IPP_DESKTOP_CONFIG') or os.path.join(DESKTOP_DIR, config.LOCAL_CONFIG)
     conf = {'server': config.DEFAULT_SERVER, 'token': '', 'timeout_sec': config.SERVER_TIMEOUT_SEC, 'error': '',
             'auto': auto_settings(), 'auto_source': '기본값'}   # auto_source: 자동 감지 설정을 어디서 읽었나 (로그용)
     try:

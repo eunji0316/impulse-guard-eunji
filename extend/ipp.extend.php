@@ -68,7 +68,8 @@ define('IPP_RISK_REASON_MAX', 3);      // 응답에 담는 이유 수 (기록에
 /* ===== 예측 서버 (C-3, ai/serve, ipp/lib/risk.lib.php) ===== */
 // 'on'이면 위험도 확률과 이유를 예측 서버(FastAPI)에서 받는다. 'off'면 지금처럼 PHP가 계산한다
 // 예측 서버가 꺼져 있거나 실패하면 자동으로 PHP 계산을 쓰고, IPP_RISK_SERVER_SKIP_SEC 동안 다시 부르지 않는다
-define('IPP_RISK_SERVER',           'off');
+// 시연 모드: 환경변수 IPP_RISK_SERVER=on으로 서버를 켜면 'on' (scripts/start.ps1 -Demo). 환경변수가 없으면 'off'
+define('IPP_RISK_SERVER',           getenv('IPP_RISK_SERVER') === 'on' ? 'on' : 'off');
 define('IPP_RISK_SERVER_URL',       'http://127.0.0.1:8002');   // 127.0.0.1, localhost, [::1]만 허용
 define('IPP_RISK_SERVER_TIMEOUT',   0.3);   // 초. check가 이보다 더 늦어지지 않는다
 define('IPP_RISK_SERVER_SKIP_SEC',  60);
@@ -78,7 +79,8 @@ define('IPP_RISK_SERVER_DOWN_FILE', G5_DATA_PATH.'/ipp_risk_server_down.txt');  
 // true면 통계 화면에 'AI 요약 보기' 버튼이 생긴다. 누르면 이번 주·지난주 집계 숫자를 예측 서버로 보내 Claude API 요약을 받는다
 // 보내는 값: 숫자와 위험도 이유 코드만 (회원 아이디, 쇼핑몰 이름, 상품명 없음). 요약은 저장하지 않는다
 // API 키는 예측 서버의 환경변수(ANTHROPIC_API_KEY)에만 둔다. 꺼져 있거나 실패하면 통계 화면은 지금 그대로
-define('IPP_USE_LLM',        false);
+// 시연 모드: 환경변수 IPP_USE_LLM=1로 서버를 켜면 true (scripts/start.ps1 -Demo -Llm). 환경변수가 없으면 false
+define('IPP_USE_LLM',        getenv('IPP_USE_LLM') === '1');
 define('IPP_LLM_SERVER_URL', 'http://127.0.0.1:8002');   // 예측 서버. 127.0.0.1, localhost, [::1]만 허용
 define('IPP_LLM_TIMEOUT',    10);    // 초. 버튼을 누른 뒤 최대로 기다리는 시간
 define('IPP_LLM_SKIP_SEC',   60);    // 예측 서버가 없거나 키가 없으면 이 시간 동안 다시 부르지 않음
