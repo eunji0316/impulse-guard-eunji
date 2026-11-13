@@ -50,7 +50,8 @@ class TestBuild(unittest.TestCase):
     def test_impulse_view(self):
         kind, v = popup_model.build(self.a, ApiResult(True, IMPULSE))
         self.assertEqual(kind, 'impulse')
-        self.assertEqual(v.item_name, '맨즈실렉터 대박 남자 오버핏 볼룹 겨울 패딩')
+        self.assertEqual(v.item_name, '쿠팡')                                   # 팝업에는 쇼핑몰 이름만 (C-2)
+        self.assertEqual(v.api_name, '맨즈실렉터 대박 남자 오버핏 볼룹 겨울 패딩')   # 서버 기록(쿨다운)에는 상품명
         self.assertEqual((v.price_text, v.orig_text, v.rate_text), ('49,600원', '119,000원', '58%'))
         self.assertEqual(v.reasons, ["'특가' 키워드가 들어 있어요.", '50,000원 이상의 큰 금액이에요.'])   # 2개까지
         self.assertEqual(v.point_text, '안 사면 +496P · 24시간 참으면 +992P')
@@ -115,7 +116,7 @@ class TestBuild(unittest.TestCase):
     def test_no_name(self):
         a = dataclasses.replace(self.a, page=dataclasses.replace(self.a.page, item_name=''))
         _, v = popup_model.build(a, ApiResult(True, IMPULSE))
-        self.assertEqual((v.item_name, v.api_name), (popup_model.NO_NAME_TEXT, popup_model.NO_NAME_API))
+        self.assertEqual((v.item_name, v.api_name), ('쿠팡', popup_model.NO_NAME_API))   # 쇼핑몰 이름은 상품명과 상관없음
 
     def test_hms(self):
         self.assertEqual(popup_model.hms(3725), '1시간 2분 5초')

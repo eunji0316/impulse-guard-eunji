@@ -806,6 +806,23 @@ class TestHandleAuto(TkCase):
         self.assertIn('못 읽어 확인 중으로 띄움', self.log_lines()[-1])
         self.close_window(app)
 
+    def test_wait_popup_timing_line(self):
+        """C-2 확인 중 발견: 금액을 기다렸다 띄운 팝업은 timing 줄이 없어 느린 이유가 안 보였다.
+        이제 '금액 기다림'과 서버·팝업 표시 시간이 있는 timing 줄을 남긴다"""
+        app = self.first_popup_closed()
+        self.handle(app, self.checkout_titled(self.no_amount(), self.T2), H2)
+        self.clock.t += config.CHECKOUT_AMOUNT_WAIT_SEC
+        with quiet():
+            self.assertTrue(app.still_same())
+            self.assertTrue(self.pump(lambda: app.window is not None))
+        line = self.log_lines(timing_lines=True)[-1]
+        self.assertIn('금액 기다림', line)
+        self.assertIn('서버', line)
+        self.assertIn('check', line)
+        self.assertIn('팝업 표시', line)
+        self.assertIn('화면 그대로 (OCR 없음)', line)
+        self.close_window(app)
+
     def test_no_wait_without_recent_order(self):
         """같은 쇼핑몰의 최근 주문이 없으면 미루지 않고 바로 '확인 중' 팝업"""
         app = self.make_app(check=(200, CHECKOUT_RESULT))

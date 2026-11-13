@@ -207,13 +207,17 @@ class Client:
         return {s['code']: [s.get('name', '')] for s in st.get('sites', []) if 'code' in s}
 
     # ── 감지 ───────────────────────────────────────────────
-    def check(self, site, item_name, price, orig_price=0, discount_rate=0, is_checkout=False, page='', log=True):
-        """상품 판단 + detect 기록 (log=True). 결과: ApiResult (data: is_blocking, is_impulse, keyword, point, point2, bl_id)"""
+    def check(self, site, item_name, price, orig_price=0, discount_rate=0, is_checkout=False, page='', log=True,
+              features=None):
+        """상품 판단 + detect 기록 (log=True). 결과: ApiResult (data: is_blocking, is_impulse, keyword, point, point2, bl_id,
+        결제 화면이면 C-2 위험도 risk, risk_level, risk_message, risk_reasons, risk_show_reasons, risk_model)
+        features: 결제 화면 위험도 입력 (risk_features.ProductTracker.features, 숫자와 None만). 없으면 보내지 않는다"""
         if not self.ensure_online():
             return ApiResult(False, msg=self.last_error or '오프라인', offline=True)
+        extra = {'features': features} if features is not None else {}
         return self.call('check', site=site, item_name=item_name, price=int(price or 0),
                          orig_price=int(orig_price or 0), discount_rate=int(discount_rate or 0),
-                         is_checkout=bool(is_checkout), page=page, log=log)
+                         is_checkout=bool(is_checkout), page=page, log=log, **extra)
 
     # ── 팝업 결정 (B-3) ────────────────────────────────────
     # 팝업 버튼은 오프라인이어도 한 번은 실제로 보내 본다 (check가 성공한 직후라 서버가 살아 있을 가능성이 크다)
@@ -226,7 +230,8 @@ class Client:
         return self.call('giveup', item_name=item_name, price=int(price or 0), bl_id=int(bl_id or 0))
 
     def fill_amount(self, bl_id, price):
-        """결제 화면 감지 기록(금액 0)에 나중에 읽은 금액을 채운다 (B-5). 이미 금액이 있으면 409"""
+        """결제 화면 감지 기록(금액 0)에 나중에 읽은 금액을 채운다 (B-5). 이미 금액이 있으면 409
+        C-2: 서버가 채운 금액으로 위험도를 다시 계산해 data에 risk_updated와 risk_* 칸(check와 같음)을 준다"""
         return self.call('amount', bl_id=int(bl_id or 0), price=int(price or 0))
 
     def decide(self, bl_id, decision):

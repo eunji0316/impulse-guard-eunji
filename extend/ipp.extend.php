@@ -56,6 +56,15 @@ define('IPP_CLIENTS', array('extension', 'desktop'));  // API를 부를 수 있�
 define('IPP_PATH', G5_PATH.'/ipp');
 define('IPP_URL',  G5_URL.'/ipp');
 
+/* ===== 충동구매 위험도 모델 (C-2, ipp/lib/risk.lib.php) ===== */
+// 결제 화면 check에서 위험도(0~1), 단계, 이유를 계산한다. 끄거나 모델 파일이 없으면 지금 규칙 이유(reasons)만
+// 위험도는 팝업 문구에만 쓰고 포인트와는 연결하지 않는다
+define('IPP_USE_RISK_MODEL',  true);
+define('IPP_RISK_MODEL_FILE', IPP_PATH.'/model/risk_model.json');   // ai/risk/train.py가 만든다
+define('IPP_RISK_LEVEL_MID',  0.3);    // 이 이상이면 보통 (이유 문장을 보임)
+define('IPP_RISK_LEVEL_HIGH', 0.55);   // 이 이상이면 높음
+define('IPP_RISK_REASON_MAX', 3);      // 응답에 담는 이유 수 (기록에는 모두)
+
 /* ===== 테이블 이름 ===== */
 $g5['ipp_account_table']     = G5_TABLE_PREFIX.'ipp_account';
 $g5['ipp_transaction_table'] = G5_TABLE_PREFIX.'ipp_transaction';

@@ -59,9 +59,20 @@ NEAR_RATE_RATIO = 6
 CONTEXT_SALE_WORDS = ['판매가', '할인가', '쿠폰적용가', '적용가', '최종가', '혜택가', '특가']
 CONTEXT_ORIG_WORDS = ['정가', '원가', '소비자가', '시중가', '정상가']
 CONTEXT_OTHER_WORDS = ['배송비', '적립', '최대', '쿠폰', '포인트', '캐시', '머니', '할부',
-                       '총', '합계', '무료', '첫 구매', '첫구매']
+                       '총', '합계', '무료', '첫 구매', '첫구매', '혜택']
+# 상품 화면에서 혜택/적립 금액으로 보고 할인가·원가 후보에서 빼는 단어 (C-2).
+# 결제 화면 목록(CHECKOUT_TOTAL_EXCLUDE)과 달리 '쿠폰', '할인'은 넣지 않는다 ('쿠폰할인가 44,800원'은 진짜 판매가).
+# 판매가 라벨(CONTEXT_SALE_WORDS, '혜택가' 등)은 먼저 지우고 비교한다
+PRICE_BENEFIT_WORDS = ['혜택', '적립', '적림', '포인트', '마일리지', '밀리지', '캐시백', '페이백', '리워드']
 # 할인율 옆에 이런 단어가 있으면 상품 할인율이 아님 (예: '첫 구매 20% 쿠폰', '최대 20% 쿠폰팩')
-RATE_OTHER_WORDS = ['쿠폰', '최대', '첫 구매', '첫구매', '적립', '신규', '카드', '만족', '평가']
+RATE_OTHER_WORDS = ['쿠폰', '최대', '첫 구매', '첫구매', '적립', '신규', '카드', '만족', '평가',
+                    '혜택', '포인트', '캐시백', '페이백', '마일리지', '리워드', '무이자', '할부']
+# 원가를 못 읽었을 때 할인가 옆에 보이는 상품 할인율을 그대로 쓴다 (C-2. Windows OCR은 취소선 원가를 자주 깨뜨린다).
+# '옆': 같은 줄이면 할인가 높이의 RATE_NEAR_SAME_LINE배 안, 위아래 줄이면 높이의 RATE_NEAR_OTHER_LINE배 안이고
+# 가로로 높이의 RATE_NEAR_X배 안 (컬리처럼 할인율이 원가 줄에 있는 경우)
+RATE_NEAR_SAME_LINE = 3
+RATE_NEAR_OTHER_LINE = 2
+RATE_NEAR_X = 1
 
 # 역할 점수 가중치. 단서 점수(0~1)에 곱해서 더한다. 학습 모델로 바꾸기 전의 규칙 점수
 ROLE_WEIGHTS = {
@@ -180,6 +191,49 @@ POPUP_COLORS = {
     'danger': '#c62828',      # 이유, 할인율, 오류 안내
     'point': '#2448c4',
 }
+
+# 위험 단계별 팝업 모양 (C-2). 서버 check의 risk_level. 위험도가 없으면(예전 서버, 모델 없음) 예전 팝업 그대로
+# 단계: (제목, 배지 글자, 제목·배지 글자색, 배지 바탕색)
+POPUP_RISK_STYLES = {
+    'high': ('충동구매 위험이 높아요', '위험 높음', '#c62828', '#fdecea'),
+    'mid':  ('결제하기 전에 잠깐만요!', '위험 보통', '#b45309', '#fef3c7'),
+    'low':  ('결제 전에 한 번만 확인해요', '위험 낮음', '#2448c4', '#e8eefe'),
+}
+POPUP_MAX_RISK_REASONS = 3           # 위험도 이유 문장 (보통 이상일 때만 보임. 서버도 최대 3개)
+
+# ── 팝업의 쇼핑몰 이름 (C-2, mall.py) ──────────────────────────
+# 코드: (팝업에 보일 이름, 도메인(뒤가 같으면 같은 쇼핑몰), 창 제목에서 찾을 이름 단어)
+# 코드는 서버 IPP_BLOCK_SITES, config.SITE_HINTS와 같게 쓴다 (naver, coupang, gmarket, 11st, zigzag, musinsa)
+MALLS = {
+    'coupang':     ('쿠팡',           ['coupang.com'],                   ['쿠팡', 'coupang']),
+    'musinsa':     ('무신사',         ['musinsa.com'],                   ['무신사', 'musinsa']),
+    'zigzag':      ('지그재그',       ['zigzag.kr'],                     ['지그재그', 'zigzag']),
+    'naver':       ('네이버쇼핑',     ['naver.com'],                     ['네이버페이', '네이버쇼핑', '스마트스토어', '네이버 플러스스토어', 'naver pay']),
+    'gmarket':     ('G마켓',          ['gmarket.co.kr'],                 ['g마켓', 'gmarket']),
+    '11st':        ('11번가',         ['11st.co.kr'],                    ['11번가']),
+    'oliveyoung':  ('올리브영',       ['oliveyoung.co.kr'],              ['올리브영', 'olive young', 'oliveyoung']),
+    'kurly':       ('컬리',           ['kurly.com'],                     ['컬리', 'kurly']),
+    'ssg':         ('SSG.COM',        ['ssg.com'],                       ['ssg.com', '신세계몰', '이마트몰']),
+    'auction':     ('옥션',           ['auction.co.kr'],                 ['옥션']),
+    'ohou':        ('오늘의집',       ['ohou.se'],                       ['오늘의집']),
+    '29cm':        ('29CM',           ['29cm.co.kr'],                    ['29cm']),
+    'wconcept':    ('W컨셉',          ['wconcept.co.kr'],                ['w컨셉', 'wconcept']),
+    'ably':        ('에이블리',       ['a-bly.com'],                     ['에이블리']),
+    'lotteon':     ('롯데ON',         ['lotteon.com'],                   ['롯데온', 'lotteon']),
+    'tmon':        ('티몬',           ['tmon.co.kr'],                    ['티몬']),
+    'wemakeprice': ('위메프',         ['wemakeprice.com'],               ['위메프']),
+    'aliexpress':  ('알리익스프레스', ['aliexpress.com'],                ['알리익스프레스', 'aliexpress']),
+    'temu':        ('테무',           ['temu.com'],                      ['테무', 'temu']),
+}
+MALL_ADDRESS_BAR_PX = 110            # 화면 맨 위 글자에서 이 높이(px) 안을 주소창 줄로 본다 (탭 줄 + 주소창)
+
+# ── 위험도용 상품 화면 특성 (C-2, risk_features.py) ─────────────
+RISK_VIEW_GAP_SEC = 300              # 같은 상품 화면을 이 시간 안에 다시 분석하면(스크롤 등) 같은 한 번
+RISK_SESSION_GAP_MIN = 30            # 상품 화면 사이가 이보다 멀면 새 쇼핑 묶음 (머문 시간을 다시 잰다)
+# 서두르게 하는 문구 (공백을 빼고 비교). 할인/쿠폰 같은 일반 단어는 결제 화면에도 늘 있어 넣지 않는다
+RISK_PRESSURE_WORDS = ['타임딜', '타임특가', '타임세일', '품절임박', '마감임박', '오늘만', '오늘마감', '오늘종료',
+                       '한정수량', '수량한정', '한정판매', '남은수량', '남은시간', '마지막기회', '곧종료', '곧마감']
+RISK_PRESSURE_RE = r'\d+명이(보고|구매|장바구니|담았)|\d+개남음|재고\d+개'
 
 # ── 자동 감지 (B-4) ────────────────────────────────────────────
 # 사람마다 바꾸는 값은 local_config.json의 "auto_detect"에서 덮어쓴다 (없으면 아래 기본값)

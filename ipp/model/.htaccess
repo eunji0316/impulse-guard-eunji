@@ -1,0 +1,12 @@
+# C-2: 위험도 모델 JSON(risk_model.json)의 HTTP 접근을 막는다.
+# 서버 PHP(ipp/lib/risk.lib.php)가 파일을 읽는 동작에는 영향이 없다.
+# 로컬 개발 서버(php -S)는 .htaccess를 읽지 않으므로 막히지 않는다.
+<IfModule mod_authz_core.c>
+    # Apache 2.4
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    # Apache 2.2
+    Order allow,deny
+    Deny from all
+</IfModule>

@@ -15,3 +15,6 @@ desktop/logs/
 
 # C-1 화면 분류 가상 데이터와 평가 결과 (ai/screen/generate.py, evaluate.py로 다시 만든다)
 ai/data/screen/
+
+# C-2 위험도 가상 데이터와 평가 결과 (ai/risk/generate.py, evaluate.py로 다시 만든다)
+ai/data/risk/
