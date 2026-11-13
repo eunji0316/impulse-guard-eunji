@@ -29,6 +29,7 @@ powershell -ExecutionPolicy Bypass -File scripts\stop.ps1           # start.ps1�
 | `-DryRun` | 실행할 명령만 보여 줌 |
 
 - 이미 켜져 있는 서버(포트 사용 중)는 다시 켜지 않습니다. 시연 모드 값은 스크립트가 켠 웹 서버에만 환경변수로 넘기고 `extend/ipp.extend.php`는 바꾸지 않습니다
+- 로그인하면 맨 위 줄(FAQ 앞)과 쇼핑몰 마이페이지에 **통계 · 포인트·리워드 · 담아두기 · 차단 설정** 메뉴가 생깁니다 (`extend/ipp.menu.extend.php`)
 - 데모 회원: `php scripts\demo_seed.php add | remove | status` (아이디 `demo`, 비밀번호 `demo1234`, 최근 2주 기록). 시연 순서는 [docs/DEMO.md](docs/DEMO.md)
 
 ## 폴더 구조
