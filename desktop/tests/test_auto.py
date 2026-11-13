@@ -806,6 +806,62 @@ class TestHandleAuto(TkCase):
         self.assertIn('못 읽어 확인 중으로 띄움', self.log_lines()[-1])
         self.close_window(app)
 
+    def test_wait_popup_timing_line(self):
+        """C-2 확인 중 발견: 금액을 기다렸다 띄운 팝업은 timing 줄이 없어 느린 이유가 안 보였다.
+        이제 '금액 기다림'과 서버·팝업 표시 시간이 있는 timing 줄을 남긴다"""
+        app = self.first_popup_closed()
+        self.handle(app, self.checkout_titled(self.no_amount(), self.T2), H2)
+        self.clock.t += config.CHECKOUT_AMOUNT_WAIT_SEC
+        with quiet():
+            self.assertTrue(app.still_same())
+            self.assertTrue(self.pump(lambda: app.window is not None))
+        line = self.log_lines(timing_lines=True)[-1]
+        self.assertIn('금액 기다림', line)
+        self.assertIn('서버', line)
+        self.assertIn('check', line)
+        self.assertIn('팝업 표시', line)
+        self.assertIn('화면 그대로 (OCR 없음)', line)
+        self.close_window(app)
+
+    def test_titles_differ(self):
+        """제목으로 다른 주문이라고 말할 수 있는 경우: 둘 다 알고, 둘 다 주문서 번호가 없고, 서로 다름"""
+        from impulse_guard.dedup import titles_differ
+        a, b = title_key('주문/결제 : 네이버페이'), title_key('주문서 작성 - 쿠팡!')
+        self.assertTrue(titles_differ(a, b))
+        self.assertFalse(titles_differ(a, title_key('주문/결제 : 네이버페이')))     # 같은 제목
+        self.assertFalse(titles_differ(a, None))                                       # 모름
+        self.assertFalse(titles_differ(title_key(self.T1), title_key(self.T2)))        # 주문서 번호가 든 제목 (지그재그)
+        self.assertFalse(titles_differ(a, title_key(self.T2)))
+
+    def test_different_title_no_wait(self):
+        """C-2: 금액을 몰라도 창 제목이 최근 주문과 분명히 다르면 기다리지 않고 바로 '확인 중' 팝업"""
+        app = self.make_app(check=(200, CHECKOUT_RESULT), decide=(200, {'ok': True}))
+        self.assertTrue(self.handle(app, self.checkout_titled(self.checkout, '주문/결제 : 네이버페이'), H1))
+        with quiet():
+            app.window.on_x()
+            self.assertTrue(self.pump(lambda: app.window is None))
+        self.clock.t += 5
+        app.orders.left()
+        self.assertTrue(self.handle(app, self.checkout_titled(self.no_amount(), '주문서 작성 - 다른 상점'), H2))
+        self.assertIsNone(app.waiting)
+        self.assertTrue(app.window.view.pending)
+        self.assertIn('창 제목이 최근 주문과 달라 기다리지 않음', self.log_lines()[-1])
+        self.close_window(app)
+
+    def test_same_or_unknown_title_still_waits(self):
+        """제목이 같거나 모르면 제목으로 구분할 수 없어 1.5초 기다린다"""
+        self.assertEqual(config.CHECKOUT_AMOUNT_WAIT_SEC, 1.5)
+        for title in ('주문/결제 : 네이버페이', None):
+            app = self.make_app(check=(200, CHECKOUT_RESULT), decide=(200, {'ok': True}))
+            self.assertTrue(self.handle(app, self.checkout_titled(self.checkout, '주문/결제 : 네이버페이'), H1))
+            with quiet():
+                app.window.on_x()
+                self.assertTrue(self.pump(lambda: app.window is None))
+            self.clock.t += 5
+            app.orders.left()
+            self.assertFalse(self.handle(app, self.checkout_titled(self.no_amount(), title), H2), title)
+            self.assertIsNotNone(app.waiting, title)
+
     def test_no_wait_without_recent_order(self):
         """같은 쇼핑몰의 최근 주문이 없으면 미루지 않고 바로 '확인 중' 팝업"""
         app = self.make_app(check=(200, CHECKOUT_RESULT))

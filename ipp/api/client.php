@@ -122,7 +122,11 @@ if ($action === 'setting') {
 // log가 true면 기록 1건도 저장한다 (데스크톱이 요청 한 번으로 판단과 기록을 함께 하도록)
 //   차단 시간이면 blocked(통계의 차단 횟수에 들어감), 아니면 detect. 저장한 이벤트는 event로 돌려준다
 // reasons: 충동구매로 본 이유 [{code, text}]. 비어 있지 않으면 is_impulse가 1이다. is_checkout이면 checkout 이유가 맨 앞
-// orig_price, discount_rate, is_checkout은 지금은 저장만 한다. 위험도 반영은 C단계
+// orig_price는 저장만 한다. is_checkout이면 위험도(C-2)를 계산한다:
+//   risk(0~1, 계산 안 하면 null), risk_level(low/mid/high/''), risk_message(단계별 머리 문구), risk_reasons [{code, text}],
+//   risk_show_reasons(보통 이상만 true. 낮음은 이유를 보이지 않고 확인 문구만), risk_model(모델 버전)
+//   위험도 입력: features {discount_rate, pressure, product_views_24h, same_item_views_24h, browse_sec} (숫자만, 선택)
+//   위험도는 포인트와 상관없다
 if ($action === 'check') {
     $site      = ipp_api_site($body, $client);
     $item_name = ipp_api_str($body, 'item_name');
@@ -142,6 +146,9 @@ if ($action === 'check') {
         'point2'      => ipp_calc_point($price, IPP_COOLDOWN_MULTIPLIER),
         'received'    => $info
     );
+    // 위험도: 결제 화면만. 이번 기록을 저장하기 전에 계산해야 과거 기록 특성에 이번 결제가 섞이지 않는다
+    $assess = $info['is_checkout'] ? ipp_risk_assess($mb_id, $price, ipp_risk_request_features($body)) : null;
+    $result = array_merge($result, ipp_risk_response($assess));
     if (ipp_api_bool($body, 'log')) {
         if (!IPP_USE_SETTING) ipp_api_json(403, false, array('msg' => '차단 설정 기능이 꺼져 있습니다.'));
         $info['client']  = $client;
@@ -149,6 +156,7 @@ if ($action === 'check') {
         $result['bl_id'] = ipp_block_log_add($mb_id, $site, ipp_api_str($body, 'url'), $item_name, $price,
             $result['event'], 0, ipp_api_str($body, 'page'), $info);
         if (!$result['bl_id']) ipp_api_json(400, false, array('msg' => '페이지 값이 올바르지 않습니다.'));
+        ipp_block_log_set_risk($result['bl_id'], $assess);
     }
     ipp_api_json(200, true, $result);
 }
@@ -225,6 +233,7 @@ if ($action === 'decide') {
 // 결제 화면 감지 기록에 나중에 읽은 금액을 채운다 (B-5)
 // 데스크톱이 금액을 못 읽은 채 check(금액 0)를 하고 '결제 금액 확인 중' 팝업을 띄운 뒤, 화면에서 금액을 읽었을 때 부른다
 // 본인의 데스크톱 결제 화면 detect 기록이고 금액이 0일 때만 한 번 채운다 (팝업 결정과 상관없이)
+// C-2: 채운 금액으로 위험도를 다시 계산해 check와 같은 risk_* 칸으로 돌려준다
 if ($action === 'amount') {
     if (!IPP_USE_SETTING) ipp_api_json(403, false, array('msg' => '차단 설정 기능이 꺼져 있습니다.'));
     $bl_id = ipp_api_int($body, 'bl_id');
@@ -233,7 +242,12 @@ if ($action === 'amount') {
     if (!ipp_block_log_fill_price($mb_id, $bl_id, $price)) {
         ipp_api_json(409, false, array('msg' => '이미 금액이 있거나 찾을 수 없는 결제 화면 감지 기록입니다.'));
     }
-    ipp_api_json(200, true, array('bl_id' => $bl_id, 'price' => $price));
+    // C-2: 금액이 생겼으니 위험도를 다시 계산해 기록을 갱신하고 응답에 준다 (처음 값은 bl_risk_*_first에 남는다).
+    // check 때 위험도가 없었으면(모델 꺼짐/없음) risk는 null이고 risk_updated는 false
+    $assess = ipp_risk_reassess($mb_id, $bl_id, $price);
+    ipp_block_log_update_risk($bl_id, $assess);
+    ipp_api_json(200, true, array_merge(array('bl_id' => $bl_id, 'price' => $price, 'risk_updated' => (bool)$assess),
+                                        ipp_risk_response($assess)));
 }
 
 ipp_api_json(400, false, array('msg' => '알 수 없는 요청입니다.'));

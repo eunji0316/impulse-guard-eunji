@@ -1,0 +1,8 @@
+# 서버 테스트 스크립트(CLI 전용)의 HTTP 접근을 막는다. 스크립트도 CLI가 아니면 404로 끝난다.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

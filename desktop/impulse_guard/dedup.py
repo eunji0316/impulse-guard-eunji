@@ -43,6 +43,13 @@ def title_key(title):
     return TitleKey(digest, bool(re.search(config.ORDER_TITLE_ID_RE, title)))
 
 
+def titles_differ(a, b):
+    """두 탭 제목으로 다른 주문이라고 말할 수 있으면 True (C-2: 금액 모름 기다림을 건너뛸지)
+    둘 다 알고, 둘 다 주문서 번호가 없는 제목이고, 서로 다를 때만. 주문서 번호가 든 제목(specific)은 지그재그처럼
+    같은 장바구니라도 '구매하기'마다 새로 생기므로 제목이 달라도 다른 주문이라고 할 수 없다 (B-5 중복 팝업 버그)"""
+    return a is not None and b is not None and not a.specific and not b.specific and a.digest != b.digest
+
+
 @dataclass
 class SeenOrder:
     site: str

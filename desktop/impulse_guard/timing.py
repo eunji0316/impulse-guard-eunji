@@ -31,6 +31,8 @@ LABELS = [
     ('ocr', 'OCR'),
     ('reread', '다시 읽기'),
     ('judge', '판정'),
+    ('features', '특성 계산'),
+    ('amount_wait', '금액 기다림'),
     ('server', '서버'),
     ('popup', '팝업 표시'),
 ]
